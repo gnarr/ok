@@ -1,0 +1,271 @@
+name: Release and Build
+
+on:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_RELEASE_VERSION: "0.25.16"
+  GIT_CLIFF_VERSION: "2.8.0"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.next_version.outputs.new_version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate sanitized Cargo.lock
+        run: |
+          cp Cargo.lock Cargo-sanitized.lock
+          sed -i '/name = "ok"/{n;/version =/d}' Cargo-sanitized.lock
+
+      - name: Cargo cache
+        uses: actions/cache@v4
+        id: cache-cargo
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo-sanitized.lock') }}
+
+      - name: Remove sanitized Cargo.lock
+        run: rm Cargo-sanitized.lock
+
+      - name: Install cargo-release and git-cliff
+        if: steps.cache-cargo.outputs.cache-hit != 'true'
+        run: |
+          cargo install cargo-release --version ${{ env.CARGO_RELEASE_VERSION }} --locked
+          cargo install git-cliff --version ${{ env.GIT_CLIFF_VERSION }} --locked
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Determine next version
+        id: next_version
+        shell: bash
+        run: |
+          new_version=$(git cliff --bumped-version | sed 's/^v//')
+          echo "new_version=$new_version" >> $GITHUB_OUTPUT
+
+      - name: Generate changelog
+        run: |
+          git cliff --output RELEASE.md --unreleased --tag v${{ steps.next_version.outputs.new_version }}
+          git cliff --output CHANGELOG.md --tag v${{ steps.next_version.outputs.new_version }}
+
+      - name: Stage changelog
+        run: git add CHANGELOG.md
+
+      - name: Commit changelog
+        run: |
+          git commit -m "chore: update changelog for v${{ steps.next_version.outputs.new_version }}" || echo "No changes to commit"
+
+      - name: Run cargo release
+        run: |
+          cargo release ${{ steps.next_version.outputs.new_version }} \
+            --no-publish \
+            --no-confirm \
+            --execute
+
+      - name: Push changes
+        run: git push --follow-tags origin main
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.next_version.outputs.new_version }}
+          body_path: RELEASE.md
+          name: Release v${{ steps.next_version.outputs.new_version }}
+          token: ${{ secrets.RELEASE_PAT }}
+
+  linux-amd64:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.new_version }}
+          fetch-depth: 0
+      - uses: actions-rs/toolchain@v1
+        with: { toolchain: stable, override: true }
+      - run: cargo build --release
+      - name: Extract name
+        id: pkg
+        run: |
+          echo "project_name=$(grep '^name =' Cargo.toml | cut -d '"' -f2)" >> $GITHUB_OUTPUT
+      - run: |
+          mkdir -p release
+          cp target/release/${{ steps.pkg.outputs.project_name }} release/${{ steps.pkg.outputs.project_name }}-linux-amd64
+      - uses: actions/upload-artifact@v4
+        with: { name: linux-amd64, path: release/*, retention-days: 1 }
+      - name: Upload Binary Artifact to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "v${{ needs.release.outputs.new_version }}" "release/${{ steps.pkg.outputs.project_name }}-linux-amd64" --clobber
+    outputs:
+      project_name: ${{ steps.pkg.outputs.project_name }}
+
+  linux-arm64:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.new_version }}
+          fetch-depth: 0
+      - uses: actions-rs/toolchain@v1
+        with: { toolchain: stable, override: true }
+      - run: cargo install cross --locked
+      - run: cross build --release --target aarch64-unknown-linux-gnu
+      - name: Extract name
+        id: pkg
+        run: |
+          echo "project_name=$(grep '^name =' Cargo.toml | cut -d '"' -f2)" >> $GITHUB_OUTPUT
+      - run: |
+          mkdir -p release
+          cp target/aarch64-unknown-linux-gnu/release/${{ steps.pkg.outputs.project_name }} release/${{ steps.pkg.outputs.project_name }}-linux-arm64
+      - uses: actions/upload-artifact@v4
+        with: { name: linux-arm64, path: release/*, retention-days: 1 }
+      - name: Upload Binary Artifact to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "v${{ needs.release.outputs.new_version }}" "release/${{ steps.pkg.outputs.project_name }}-linux-arm64" --clobber
+    outputs:
+      project_name: ${{ steps.pkg.outputs.project_name }}
+
+  linux-armv7:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.new_version }}
+          fetch-depth: 0
+      - uses: actions-rs/toolchain@v1
+        with: { toolchain: stable, override: true }
+      - run: cargo install cross --locked
+      - run: cross build --release --target armv7-unknown-linux-gnueabihf
+      - name: Extract name
+        id: pkg
+        run: |
+          echo "project_name=$(grep '^name =' Cargo.toml | cut -d '"' -f2)" >> $GITHUB_OUTPUT
+      - run: |
+          mkdir -p release
+          cp target/armv7-unknown-linux-gnueabihf/release/${{ steps.pkg.outputs.project_name }} release/${{ steps.pkg.outputs.project_name }}-linux-armv7
+      - uses: actions/upload-artifact@v4
+        with: { name: linux-armv7, path: release/*, retention-days: 1 }
+      - name: Upload Binary Artifact to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "v${{ needs.release.outputs.new_version }}" "release/${{ steps.pkg.outputs.project_name }}-linux-armv7" --clobber
+    outputs:
+      project_name: ${{ steps.pkg.outputs.project_name }}
+
+  windows-amd64:
+    needs: release
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.new_version }}
+          fetch-depth: 0
+      - uses: actions-rs/toolchain@v1
+        with: { toolchain: stable, override: true }
+      - run: cargo build --release
+      - name: Extract name
+        id: pkg
+        shell: pwsh
+        run: |
+          $n = (Get-Content Cargo.toml | Select-String '^name').Line -replace '.*"|".*',''
+          echo "project_name=$n" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - run: |
+          mkdir release
+          cp target/release/${{ steps.pkg.outputs.project_name }}.exe release/${{ steps.pkg.outputs.project_name }}-windows-amd64.exe
+      - uses: actions/upload-artifact@v4
+        with: { name: windows-amd64, path: release/*, retention-days: 1 }
+      - name: Upload Binary Artifact to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "v${{ needs.release.outputs.new_version }}" "release/${{ steps.pkg.outputs.project_name }}-windows-amd64.exe" --clobber
+    outputs:
+      project_name: ${{ steps.pkg.outputs.project_name }}
+
+  apple-arm64:
+    needs: release
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.new_version }}
+          fetch-depth: 0
+      - uses: actions-rs/toolchain@v1
+        with: { toolchain: stable, override: true }
+      - run: cargo install cross --locked
+      - run: cross build --release --target aarch64-apple-darwin
+      - name: Extract name
+        id: pkg
+        run: |
+          echo "project_name=$(grep '^name =' Cargo.toml | cut -d '"' -f2)" >> $GITHUB_OUTPUT
+      - run: |
+          mkdir -p release
+          cp target/aarch64-apple-darwin/release/${{ steps.pkg.outputs.project_name }} release/${{ steps.pkg.outputs.project_name }}-darwin-arm64
+      - uses: actions/upload-artifact@v4
+        with: { name: darwin-arm64, path: release/*, retention-days: 1 }
+      - name: Upload Binary Artifact to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "v${{ needs.release.outputs.new_version }}" "release/${{ steps.pkg.outputs.project_name }}-darwin-arm64" --clobber
+    outputs:
+      project_name: ${{ steps.pkg.outputs.project_name }}
+
+  docker_image:
+    needs: [linux-amd64, linux-arm64, linux-armv7]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.new_version }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with: { path: binaries, pattern: 'linux-*' }
+      - run: |
+          mkdir -p binaries/linux-{amd64,arm64,arm-v7}
+          find binaries/ -name '*linux-amd64*' -exec mv {} binaries/linux-amd64/ok_server \;
+          find binaries/ -name '*linux-arm64*' -exec mv {} binaries/linux-arm64/ok_server \;
+          find binaries/ -name '*linux-armv7*' -exec mv {} binaries/linux-armv7/ok_server \;
+      - uses: docker/setup-qemu-action@v2
+      - uses: docker/setup-buildx-action@v2
+      - uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ github.token }}
+      - uses: docker/build-push-action@v4
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64,linux/arm/v7
+          push: true
+          tags: |
+            gnarr/ok:v${{ needs.release.outputs.new_version }}
+            gnarr/ok:latest
+          build-args: |
+            TARGETARCH=${{ matrix.arch }}
+            BINARY_NAME=ok_server
