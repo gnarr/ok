@@ -15,8 +15,10 @@ ARG TARGETVARIANT
 # Default port
 ENV PORT=8080
 
-# Copy the appropriate prebuilt binary
-COPY binaries/linux-${TARGETARCH}${TARGETVARIANT:+-${TARGETVARIANT}}/ok_server /usr/local/bin/ok_server
+# Copy the appropriate prebuilt binary and set executable
+COPY --chmod=0755 \
+  binaries/linux-${TARGETARCH}${TARGETVARIANT:+-${TARGETVARIANT}}/ok_server \
+  /usr/local/bin/ok_server
 
 EXPOSE 8080
 USER nonroot
