@@ -9,13 +9,15 @@ FROM gcr.io/distroless/static:nonroot
 ARG BINARY_NAME=ok_server
 # Architecture (amd64, arm64, armv7)
 ARG TARGETARCH
+# Variant for architectures like arm (v7)
+ARG TARGETVARIANT
 
 # Default port
 ENV PORT=8080
 
 # Copy the appropriate prebuilt binary
-# Expects binaries/linux-<TARGETARCH>/<BINARY_NAME>
-COPY binaries/linux-${TARGETARCH}/${BINARY_NAME} /usr/local/bin/${BINARY_NAME}
+# Expects binaries/linux-<TARGETARCH>[-<TARGETVARIANT>]/<BINARY_NAME>
+COPY binaries/linux-${TARGETARCH}${TARGETVARIANT:+-${TARGETVARIANT}}/${BINARY_NAME} /usr/local/bin/${BINARY_NAME}
 
 EXPOSE 8080
 USER nonroot
