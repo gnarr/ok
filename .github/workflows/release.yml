@@ -100,8 +100,6 @@ jobs:
         with:
           ref: v${{ needs.release.outputs.new_version }}
           fetch-depth: 0
-      - uses: actions-rs/toolchain@v1
-        with: { toolchain: stable, override: true }
       - run: cargo build --release
       - name: Extract name
         id: pkg
@@ -127,8 +125,6 @@ jobs:
         with:
           ref: v${{ needs.release.outputs.new_version }}
           fetch-depth: 0
-      - uses: actions-rs/toolchain@v1
-        with: { toolchain: stable, override: true }
       - run: cargo install cross --locked
       - run: cross build --release --target aarch64-unknown-linux-gnu
       - name: Extract name
@@ -155,8 +151,6 @@ jobs:
         with:
           ref: v${{ needs.release.outputs.new_version }}
           fetch-depth: 0
-      - uses: actions-rs/toolchain@v1
-        with: { toolchain: stable, override: true }
       - run: cargo install cross --locked
       - run: cross build --release --target armv7-unknown-linux-gnueabihf
       - name: Extract name
@@ -183,8 +177,6 @@ jobs:
         with:
           ref: v${{ needs.release.outputs.new_version }}
           fetch-depth: 0
-      - uses: actions-rs/toolchain@v1
-        with: { toolchain: stable, override: true }
       - run: cargo build --release
       - name: Extract name
         id: pkg
@@ -217,8 +209,6 @@ jobs:
         with:
           ref: v${{ needs.release.outputs.new_version }}
           fetch-depth: 0
-      - uses: actions-rs/toolchain@v1
-        with: { toolchain: stable, override: true }
       - run: cargo install cross --locked
       - run: cross build --release --target aarch64-apple-darwin
       - name: Extract name
