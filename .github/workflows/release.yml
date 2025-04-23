@@ -190,11 +190,16 @@ jobs:
         id: pkg
         shell: pwsh
         run: |
-          $n = (Get-Content Cargo.toml | Select-String '^name').Line -replace '.*"|".*',''
-          echo "project_name=$n" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-      - run: |
-          mkdir release
-          cp target/release/${{ steps.pkg.outputs.project_name }}.exe release/${{ steps.pkg.outputs.project_name }}-windows-amd64.exe
+          $line = Select-String -Path Cargo.toml -Pattern '^name\s*='
+          if (-not $line) { Throw 'Cannot find package name in Cargo.toml' }
+          $n = $line.Line -replace '.*=\s*"(.*)".*','$1'
+          "project_name=$n" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+      - name: Copy Windows binary
+        shell: pwsh
+        run: |
+          mkdir -Force release
+          cp "target/release/${{ steps.pkg.outputs.project_name }}.exe" `
+              "release/${{ steps.pkg.outputs.project_name }}-windows-amd64.exe"
       - uses: actions/upload-artifact@v4
         with: { name: windows-amd64, path: release/*, retention-days: 1 }
       - name: Upload Binary Artifact to GitHub Release
