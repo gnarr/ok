@@ -244,9 +244,9 @@ jobs:
         with: { path: binaries, pattern: 'linux-*' }
       - run: |
           mkdir -p binaries/linux-{amd64,arm64,arm-v7}
-          find binaries/ -name '*linux-amd64*' -exec mv {} binaries/linux-amd64/ok_server \;
-          find binaries/ -name '*linux-arm64*' -exec mv {} binaries/linux-arm64/ok_server \;
-          find binaries/ -name '*linux-armv7*' -exec mv {} binaries/linux-arm-v7/ok_server \;
+          mv binaries/linux-amd64/ok-linux-amd64    binaries/linux-amd64/ok_server
+          mv binaries/linux-arm64/ok-linux-arm64    binaries/linux-arm64/ok_server
+          mv binaries/linux-armv7/ok-linux-armv7    binaries/linux-arm-v7/ok_server
       - uses: docker/setup-qemu-action@v2
       - uses: docker/setup-buildx-action@v2
       - uses: docker/login-action@v2
