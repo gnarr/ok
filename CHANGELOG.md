@@ -2,11 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.3] - 2025-04-23
+
+### 🐛 Bug Fixes
+
+- Update Dockerfile to handle TARGETVARIANT
+
 ## [0.1.2] - 2025-04-22
 
 ### 🐛 Bug Fixes
 
 - *(ci)* Release needed for docker_image step
+
+### ⚙️ Miscellaneous Tasks
+
+- Update changelog for v0.1.2
+- Release ok version 0.1.2
 
 ## [0.1.1] - 2025-04-22
 
