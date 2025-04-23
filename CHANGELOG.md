@@ -2,11 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.7] - 2025-04-23
+
+### ⚙️ Miscellaneous Tasks
+
+- Remove actions-rs/toolchain@v1
+
 ## [0.1.6] - 2025-04-23
 
 ### 🐛 Bug Fixes
 
 - Name extraction for Windows build
+
+### ⚙️ Miscellaneous Tasks
+
+- Update changelog for v0.1.6
+- Release ok version 0.1.6
 
 ## [0.1.5] - 2025-04-23
 
