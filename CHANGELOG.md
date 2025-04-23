@@ -2,11 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.4] - 2025-04-23
+
+### 🐛 Bug Fixes
+
+- Remove TARGETARCH override and correct arm-v7 binary name
+
 ## [0.1.3] - 2025-04-23
 
 ### 🐛 Bug Fixes
 
 - Update Dockerfile to handle TARGETVARIANT
+
+### ⚙️ Miscellaneous Tasks
+
+- Update changelog for v0.1.3
+- Release ok version 0.1.3
 
 ## [0.1.2] - 2025-04-22
 
