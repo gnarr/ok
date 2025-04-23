@@ -16,9 +16,9 @@ ARG TARGETVARIANT
 ENV PORT=8080
 
 # Copy the appropriate prebuilt binary
-# Expects binaries/linux-<TARGETARCH>[-<TARGETVARIANT>]/<BINARY_NAME>
-COPY binaries/linux-${TARGETARCH}${TARGETVARIANT:+-${TARGETVARIANT}}/${BINARY_NAME} /usr/local/bin/${BINARY_NAME}
+COPY binaries/linux-${TARGETARCH}${TARGETVARIANT:+-${TARGETVARIANT}}/ok_server /usr/local/bin/ok_server
 
 EXPOSE 8080
 USER nonroot
-ENTRYPOINT ["/usr/local/bin/${BINARY_NAME}"]
+
+ENTRYPOINT ["/usr/local/bin/ok_server"]
