@@ -3,7 +3,7 @@
 # Runtime-only Dockerfile: uses prebuilt binaries from host context
 # Build with buildx by passing TARGETARCH and BINARY_NAME
 
-FROM gcr.io/distroless/static:nonroot
+FROM gcr.io/distroless/cc:nonroot
 
 # Name of the binary (without extension)
 ARG BINARY_NAME=ok_server
