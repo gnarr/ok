@@ -41,6 +41,27 @@ fn read_request(stream: &mut TcpStream) -> std::io::Result<String> {
     Ok(String::from_utf8_lossy(&buffer).to_string())
 }
 
+fn write_response(stream: &mut TcpStream, content_type: &str, content: &[u8]) {
+    let headers = format!(
+        "HTTP/1.1 200 OK\r\n\
+             Connection: close\r\n\
+             Content-Type: {}\r\n\
+             Content-Length: {}\r\n\r\n",
+        content_type,
+        content.len()
+    );
+    if let Err(e) = stream.write_all(headers.as_bytes()) {
+        eprintln!("Write headers error: {}", e);
+        return
+    }
+    if let Err(e) = stream.write_all(content) {
+        eprintln!("Write data error: {}", e);
+    }
+    if let Err(e) = stream.flush() {
+        eprintln!("Flush error: {}", e);
+    }
+}
+
 fn handle_connection(mut stream: TcpStream) {
     let timeout = Duration::from_secs(5);
     let peer_address = stream
@@ -72,39 +93,11 @@ fn handle_connection(mut stream: TcpStream) {
     );
 
     if request_line.starts_with("GET /favicon.ico") {
-        let headers = format!(
-            "HTTP/1.1 200 OK\r\n\
-             Connection: close\r\n\
-             Content-Type: image/png\r\n\
-             Content-Length: {}\r\n\r\n",
-            FAVICON_PNG.len()
-        );
-        if let Err(e) = stream.write_all(headers.as_bytes()) {
-            eprintln!("Write favicon headers error: {}", e);
-            return;
-        }
-        if let Err(e) = stream.write_all(FAVICON_PNG) {
-            eprintln!("Write favicon data error: {}", e);
-        }
-        if let Err(e) = stream.flush() {
-            eprintln!("Flush error: {}", e);
-        }
+        write_response(&mut stream, "image/png", FAVICON_PNG);
         return;
     }
 
-    let response = "\
-HTTP/1.1 200 OK\r\n\
-Connection: close\r\n\
-Content-Length: 2\r\n\
-\r\n\
-OK";
-
-    if let Err(e) = stream.write_all(response.as_bytes()) {
-        eprintln!("Write error: {}", e);
-    }
-    if let Err(e) = stream.flush() {
-        eprintln!("Flush error: {}", e);
-    }
+    write_response(&mut stream, "text/plain", b"OK");
 }
 
 fn main() -> std::io::Result<()> {
