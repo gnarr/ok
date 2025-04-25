@@ -10,13 +10,33 @@ const MAX_BODY_SIZE: usize = 1 * 1024 * 1024;
 const OK_RESPONSE: &[u8] = b"HTTP/1.1 200 OK\r\n\
 Connection: close\r\n\
 Content-Type: text/plain; charset=utf-8\r\n\
+X-Content-Type-Options: nosniff\r\n\
+X-Frame-Options: DENY\r\n\
 Content-Length: 2\r\n\r\n\
 OK";
 
 const FAVICON_HEADER: &[u8] = b"HTTP/1.1 200 OK\r\n\
 Connection: close\r\n\
 Content-Type: image/png\r\n\
+X-Content-Type-Options: nosniff\r\n\
+X-Frame-Options: DENY\r\n\
 Content-Length: 130\r\n\r\n";
+
+const RESPONSE_408: &[u8] = b"HTTP/1.1 408 Request Timeout\r\n\
+Connection: close\r\n\
+X-Content-Type-Options: nosniff\r\n\
+X-Frame-Options: DENY\r\n\
+Content-Length: 0\r\n\r\n";
+const RESPONSE_431: &[u8] = b"HTTP/1.1 431 Request Header Fields Too Large\r\n\
+Connection: close\r\n\
+X-Content-Type-Options: nosniff\r\n\
+X-Frame-Options: DENY\r\n\
+Content-Length: 0\r\n\r\n";
+const RESPONSE_413: &[u8] = b"HTTP/1.1 413 Payload Too Large\r\n\
+Connection: close\r\n\
+X-Content-Type-Options: nosniff\r\n\
+X-Frame-Options: DENY\r\n\
+Content-Length: 0\r\n\r\n";
 
 const FAVICON_PNG: &[u8] = &[
     0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
@@ -29,12 +49,6 @@ const FAVICON_PNG: &[u8] = &[
     0x00, 0x3D, 0xEB, 0xB1, 0x31, 0x2A, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42,
     0x60, 0x82,
 ];
-
-const RESPONSE_408: &[u8] =
-    b"HTTP/1.1 408 Request Timeout\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
-const RESPONSE_431: &[u8] = b"HTTP/1.1 431 Request Header Fields Too Large\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
-const RESPONSE_413: &[u8] =
-    b"HTTP/1.1 413 Payload Too Large\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
 
 fn read_headers(stream: &mut TcpStream) -> std::io::Result<String> {
     let mut buffer = [0u8; MAX_HEADER_SIZE];
@@ -103,13 +117,17 @@ fn handle_connection(mut stream: TcpStream) {
 
     let headers = match read_headers(&mut stream) {
         Ok(h) => h,
-        Err(e) => {
-            match e.kind() {
-                std::io::ErrorKind::TimedOut => { let _ = stream.write_all(RESPONSE_408); return; }
-                std::io::ErrorKind::InvalidData => { let _ = stream.write_all(RESPONSE_431); return; }
-                _ => return,
+        Err(e) => match e.kind() {
+            std::io::ErrorKind::TimedOut => {
+                let _ = stream.write_all(RESPONSE_408);
+                return;
             }
-        }
+            std::io::ErrorKind::InvalidData => {
+                let _ = stream.write_all(RESPONSE_431);
+                return;
+            }
+            _ => return,
+        },
     };
 
     let mut content_length = 0;
