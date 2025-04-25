@@ -50,6 +50,19 @@ const FAVICON_PNG: &[u8] = &[
     0x60, 0x82,
 ];
 
+fn sanitize(input: &str) -> String {
+    input
+        .chars()
+        .map(|c| {
+            if c.is_control() || c == '"' {
+                '?' // replace with placeholder
+            } else {
+                c
+            }
+        })
+        .collect()
+}
+
 fn read_headers(stream: &mut TcpStream) -> std::io::Result<String> {
     let mut buffer = [0u8; MAX_HEADER_SIZE];
     let mut total_read = 0;
@@ -144,7 +157,8 @@ fn handle_connection(mut stream: TcpStream) {
         .peer_addr()
         .map(|a| a.to_string())
         .unwrap_or_else(|_| "unknown".into());
-    let request_line = headers.lines().next().unwrap_or("");
+    let request_line_raw = headers.lines().next().unwrap_or("");
+    let request_line = sanitize(request_line_raw);
     println!(
         "{} \"{}\" {} bytes",
         peer_address,
