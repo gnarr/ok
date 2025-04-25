@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex, mpsc};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{env, thread};
 
 const MAX_HEADER_SIZE: usize = 8192;
@@ -33,7 +33,17 @@ fn read_request(stream: &mut TcpStream) -> std::io::Result<String> {
     let mut total_read = 0;
     let mut temp = [0u8; 512];
 
+    let start_time = Instant::now();
+    let max_duration = Duration::from_secs(5);
+
     loop {
+        if start_time.elapsed() > max_duration {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "Header read timeout",
+            ));
+        }
+
         let n = stream.read(&mut temp)?;
         if n == 0 {
             break;
