@@ -1,11 +1,15 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{
+    Arc, Mutex,
+    mpsc::{TrySendError, sync_channel},
+};
 use std::time::{Duration, Instant};
 use std::{env, thread};
 
 const MAX_HEADER_SIZE: usize = 8192;
 const MAX_BODY_SIZE: usize = 1 * 1024 * 1024;
+const QUEUE_CAPACITY: usize = 100;
 
 const OK_RESPONSE: &[u8] = b"HTTP/1.1 200 OK\r\n\
 Connection: close\r\n\
@@ -126,14 +130,18 @@ fn read_body(stream: &mut TcpStream, mut remaining: usize) -> std::io::Result<()
 fn get_client_address(stream: &mut TcpStream, headers: &String) -> String {
     let mut client_ip: Option<String> = None;
     for line in headers.lines() {
-        if let Some(val) = line.strip_prefix("X-Forwarded-For:")
+        if let Some(val) = line
+            .strip_prefix("X-Forwarded-For:")
             .or_else(|| line.strip_prefix("x-forwarded-for:"))
         {
             client_ip = Some(val.trim().split(',').next().unwrap_or("").to_string());
             break;
         }
     }
-    let fallback_ip = stream.peer_addr().map(|a| a.to_string()).unwrap_or_else(|_| "unknown".into());
+    let fallback_ip = stream
+        .peer_addr()
+        .map(|a| a.to_string())
+        .unwrap_or_else(|_| "unknown".into());
     let peer_address_raw = client_ip.unwrap_or(fallback_ip);
     let peer_address = sanitize(&peer_address_raw);
     peer_address
@@ -204,7 +212,7 @@ fn main() -> std::io::Result<()> {
     let listener = TcpListener::bind(&bind_addr)?;
     println!("Listening on {}", bind_addr);
 
-    let (sender, receiver) = mpsc::channel::<TcpStream>();
+    let (sender, receiver) = sync_channel::<TcpStream>(QUEUE_CAPACITY);
     let receiver = Arc::new(Mutex::new(receiver));
     let pool_size = 4;
     for _ in 0..pool_size {
@@ -217,14 +225,13 @@ fn main() -> std::io::Result<()> {
         });
     }
 
-    for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => {
-                if sender.send(stream).is_err() {
-                    eprintln!("Worker threads have shut down");
-                    break;
-                }
-            }
+    for incoming in listener.incoming() {
+        match incoming {
+            Ok(stream) => match sender.try_send(stream) {
+                Ok(()) => {}
+                Err(TrySendError::Full(_)) => {}
+                Err(TrySendError::Disconnected(_)) => break,
+            },
             Err(e) => eprintln!("Connection failed: {}", e),
         }
     }
