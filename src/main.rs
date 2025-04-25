@@ -29,6 +29,13 @@ const FAVICON_PNG: &[u8] = &[
     0x00, 0x3D, 0xEB, 0xB1, 0x31, 0x2A, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42,
     0x60, 0x82,
 ];
+
+const RESPONSE_408: &[u8] =
+    b"HTTP/1.1 408 Request Timeout\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
+const RESPONSE_431: &[u8] = b"HTTP/1.1 431 Request Header Fields Too Large\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
+const RESPONSE_413: &[u8] =
+    b"HTTP/1.1 413 Payload Too Large\r\nConnection: close\r\nContent-Length: 0\r\n\r\n";
+
 fn read_headers(stream: &mut TcpStream) -> std::io::Result<String> {
     let mut buffer = [0u8; MAX_HEADER_SIZE];
     let mut total_read = 0;
@@ -90,18 +97,19 @@ fn read_body(stream: &mut TcpStream, mut remaining: usize) -> std::io::Result<()
 }
 
 fn handle_connection(mut stream: TcpStream) {
-    let peer_address = stream
-        .peer_addr()
-        .map(|a| a.to_string())
-        .unwrap_or_else(|_| "unknown".into());
-
     let timeout = Duration::from_secs(5);
     stream.set_read_timeout(Some(timeout)).ok();
     stream.set_write_timeout(Some(timeout)).ok();
 
     let headers = match read_headers(&mut stream) {
         Ok(h) => h,
-        Err(e) => { eprintln!("Failed to read headers: {}", e); return; }
+        Err(e) => {
+            match e.kind() {
+                std::io::ErrorKind::TimedOut => { let _ = stream.write_all(RESPONSE_408); return; }
+                std::io::ErrorKind::InvalidData => { let _ = stream.write_all(RESPONSE_431); return; }
+                _ => return,
+            }
+        }
     };
 
     let mut content_length = 0;
@@ -114,15 +122,26 @@ fn handle_connection(mut stream: TcpStream) {
         }
     }
 
+    let peer_address = stream
+        .peer_addr()
+        .map(|a| a.to_string())
+        .unwrap_or_else(|_| "unknown".into());
+    let request_line = headers.lines().next().unwrap_or("");
+    println!(
+        "{} \"{}\" {} bytes",
+        peer_address,
+        request_line,
+        headers.len() + content_length
+    );
+
     if content_length > 0 {
         if let Err(e) = read_body(&mut stream, content_length) {
-            eprintln!("Failed to read body: {}", e);
+            if e.kind() == std::io::ErrorKind::InvalidData {
+                let _ = stream.write_all(RESPONSE_413);
+            }
             return;
         }
     }
-
-    let request_line = headers.lines().next().unwrap_or("");
-    println!("{} \"{}\" {} bytes", peer_address, request_line, headers.len() + content_length);
 
     if request_line.starts_with("GET /favicon.ico") {
         let _ = stream.write_all(FAVICON_HEADER);
