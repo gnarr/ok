@@ -89,7 +89,10 @@ fn read_headers(stream: &mut TcpStream) -> std::io::Result<String> {
 
         let n = stream.read(&mut temp)?;
         if n == 0 {
-            break;
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "Connection closed before full header was received",
+            ));
         }
         if total_read + n > MAX_HEADER_SIZE {
             return Err(std::io::Error::new(
