@@ -2,11 +2,52 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0] - 2025-04-25
+
+### 🚀 Features
+
+- Add request logging
+- Add favicon
+- Create a thread pool with 4 threads
+- Better error responses
+- Add `X-Content-Type-Options` and `X-Frame-Options` security headers
+- Sanitize request_line before printing to logs
+- Get client ip-address from X-Forwarded-For with fallback to stream.peer_addr
+- Switch to per-worker bounded channels and round-robin dispatch
+- Connection handling panic isolation
+- Reject chunked encoding
+- Logger thread to prevent log message intermixing
+
+### 🐛 Bug Fixes
+
+- Potential Slowloris attacks
+- Improve performance by having a fixed size buffer for reading
+- Improve Slowloris mitigation
+- Mitigate TCP receive buffer stalling attacks
+- Use sync_channel with queue capacity of 100
+- Log dropped connections
+- Return error on when remaining > 0 and n == 0
+- Parse headers in lower-case
+- Treat premature EOF while reading headers as an error, not success
+
+### 🚜 Refactor
+
+- Add generalized write_response method
+
+### ⚡ Performance
+
+- Pre-build byte slices
+
 ## [0.1.10] - 2025-04-23
 
 ### 🐛 Bug Fixes
 
 - Use distroless/cc instead of distroless/static
+
+### ⚙️ Miscellaneous Tasks
+
+- Update changelog for v0.1.10
+- Release ok version 0.1.10
 
 ## [0.1.9] - 2025-04-23
 
