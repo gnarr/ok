@@ -1,10 +1,21 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::{Arc, Mutex, mpsc};
 use std::time::Duration;
 use std::{env, thread};
-use std::sync::{mpsc, Arc, Mutex};
 
 const MAX_HEADER_SIZE: usize = 8192;
+
+const OK_RESPONSE: &[u8] = b"HTTP/1.1 200 OK\r\n\
+Connection: close\r\n\
+Content-Type: text/plain; charset=utf-8\r\n\
+Content-Length: 2\r\n\r\n\
+OK";
+
+const FAVICON_HEADER: &[u8] = b"HTTP/1.1 200 OK\r\n\
+Connection: close\r\n\
+Content-Type: image/png\r\n\
+Content-Length: 130\r\n\r\n";
 
 const FAVICON_PNG: &[u8] = &[
     0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
@@ -48,27 +59,6 @@ fn read_request(stream: &mut TcpStream) -> std::io::Result<String> {
     Ok(String::from_utf8_lossy(&buffer[..total_read]).to_string())
 }
 
-fn write_response(stream: &mut TcpStream, content_type: &str, content: &[u8]) {
-    let headers = format!(
-        "HTTP/1.1 200 OK\r\n\
-             Connection: close\r\n\
-             Content-Type: {}\r\n\
-             Content-Length: {}\r\n\r\n",
-        content_type,
-        content.len()
-    );
-    if let Err(e) = stream.write_all(headers.as_bytes()) {
-        eprintln!("Write headers error: {}", e);
-        return
-    }
-    if let Err(e) = stream.write_all(content) {
-        eprintln!("Write data error: {}", e);
-    }
-    if let Err(e) = stream.flush() {
-        eprintln!("Flush error: {}", e);
-    }
-}
-
 fn handle_connection(mut stream: TcpStream) {
     let timeout = Duration::from_secs(5);
     let peer_address = stream
@@ -100,11 +90,13 @@ fn handle_connection(mut stream: TcpStream) {
     );
 
     if request_line.starts_with("GET /favicon.ico") {
-        write_response(&mut stream, "image/png", FAVICON_PNG);
+        let _ = stream.write_all(FAVICON_HEADER);
+        let _ = stream.write_all(FAVICON_PNG);
+        let _ = stream.flush();
         return;
     }
-
-    write_response(&mut stream, "text/plain", b"OK");
+    let _ = stream.write_all(OK_RESPONSE);
+    let _ = stream.flush();
 }
 
 fn main() -> std::io::Result<()> {
@@ -119,9 +111,11 @@ fn main() -> std::io::Result<()> {
     let pool_size = 4;
     for _ in 0..pool_size {
         let thread_receiver = Arc::clone(&receiver);
-        thread::spawn(move || loop {
-            let stream = thread_receiver.lock().unwrap().recv().unwrap();
-            handle_connection(stream);
+        thread::spawn(move || {
+            loop {
+                let stream = thread_receiver.lock().unwrap().recv().unwrap();
+                handle_connection(stream);
+            }
         });
     }
 
