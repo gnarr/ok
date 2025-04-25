@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::panic;
-use std::sync::mpsc::{TrySendError, sync_channel};
+use std::sync::mpsc::{TrySendError, sync_channel, Sender, channel};
 use std::time::{Duration, Instant};
 use std::{env, thread};
 
@@ -151,7 +151,7 @@ fn get_client_address(stream: &mut TcpStream, headers: &String) -> String {
     peer_address
 }
 
-fn handle_connection(mut stream: TcpStream) {
+fn handle_connection(mut stream: TcpStream, log_tx: Sender<String>) {
     let timeout = Duration::from_secs(5);
     stream.set_read_timeout(Some(timeout)).ok();
     stream.set_write_timeout(Some(timeout)).ok();
@@ -192,12 +192,10 @@ fn handle_connection(mut stream: TcpStream) {
     let peer_address = get_client_address(&mut stream, &headers);
     let request_line_raw = headers.lines().next().unwrap_or("");
     let request_line = sanitize(request_line_raw);
-    println!(
-        "{} \"{}\" {} bytes",
-        peer_address,
-        request_line,
-        headers.len() + content_length
-    );
+    let byte_count = headers.len() + content_length;
+
+    let log_message = format!("{} \"{}\" {} bytes", peer_address, request_line, byte_count);
+    let _ = log_tx.send(log_message);
 
     if content_length > 0 {
         if let Err(e) = read_body(&mut stream, content_length) {
@@ -224,13 +222,21 @@ fn main() -> std::io::Result<()> {
     let listener = TcpListener::bind(&bind_addr)?;
     println!("Listening on {}", bind_addr);
 
+    let (log_tx, log_rx) = channel::<String>();
+    thread::spawn(move || {
+        for msg in log_rx {
+            println!("{}", msg);
+        }
+    });
+
     let mut senders = Vec::with_capacity(POOL_SIZE);
     for _ in 0..POOL_SIZE {
         let (tx, rx) = sync_channel::<TcpStream>(QUEUE_CAPACITY);
         senders.push(tx);
+        let log_tx_clone = log_tx.clone();
         thread::spawn(move || {
             for stream in rx {
-                if let Err(err) = panic::catch_unwind(|| handle_connection(stream)) {
+                if let Err(err) = panic::catch_unwind(|| handle_connection(stream, log_tx_clone.clone())) {
                     eprintln!("Worker thread panicked: {:?}", err);
                 }
             }
