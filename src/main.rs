@@ -124,7 +124,10 @@ fn read_body(stream: &mut TcpStream, mut remaining: usize) -> std::io::Result<()
         let to_read = std::cmp::min(buf.len(), remaining);
         let n = stream.read(&mut buf[..to_read])?;
         if n == 0 {
-            break;
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "Connection closed before full body was received",
+            ));
         }
         remaining -= n;
     }
