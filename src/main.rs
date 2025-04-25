@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use std::{env, thread};
 
 const MAX_HEADER_SIZE: usize = 8192;
+const MAX_BODY_SIZE: usize = 1 * 1024 * 1024;
 
 const OK_RESPONSE: &[u8] = b"HTTP/1.1 200 OK\r\n\
 Connection: close\r\n\
@@ -28,16 +29,16 @@ const FAVICON_PNG: &[u8] = &[
     0x00, 0x3D, 0xEB, 0xB1, 0x31, 0x2A, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42,
     0x60, 0x82,
 ];
-fn read_request(stream: &mut TcpStream) -> std::io::Result<String> {
+fn read_headers(stream: &mut TcpStream) -> std::io::Result<String> {
     let mut buffer = [0u8; MAX_HEADER_SIZE];
     let mut total_read = 0;
     let mut temp = [0u8; 512];
 
     let start_time = Instant::now();
-    let max_duration = Duration::from_secs(5);
+    let deadline = Duration::from_secs(5);
 
     loop {
-        if start_time.elapsed() > max_duration {
+        if start_time.elapsed() > deadline {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
                 "Header read timeout",
@@ -69,43 +70,66 @@ fn read_request(stream: &mut TcpStream) -> std::io::Result<String> {
     Ok(String::from_utf8_lossy(&buffer[..total_read]).to_string())
 }
 
+fn read_body(stream: &mut TcpStream, mut remaining: usize) -> std::io::Result<()> {
+    if remaining > MAX_BODY_SIZE {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "Body too large",
+        ));
+    }
+    let mut buf = [0u8; 4096];
+    while remaining > 0 {
+        let to_read = std::cmp::min(buf.len(), remaining);
+        let n = stream.read(&mut buf[..to_read])?;
+        if n == 0 {
+            break;
+        }
+        remaining -= n;
+    }
+    Ok(())
+}
+
 fn handle_connection(mut stream: TcpStream) {
-    let timeout = Duration::from_secs(5);
     let peer_address = stream
         .peer_addr()
         .map(|a| a.to_string())
         .unwrap_or_else(|_| "unknown".into());
 
-    stream
-        .set_read_timeout(Some(timeout))
-        .unwrap_or_else(|e| eprintln!("Error setting read timeout: {}", e));
-    stream
-        .set_write_timeout(Some(timeout))
-        .unwrap_or_else(|e| eprintln!("Error setting write timeout: {}", e));
+    let timeout = Duration::from_secs(5);
+    stream.set_read_timeout(Some(timeout)).ok();
+    stream.set_write_timeout(Some(timeout)).ok();
 
-    let request = match read_request(&mut stream) {
-        Ok(req) => req,
-        Err(e) => {
-            eprintln!("Failed to read request: {}", e);
-            return;
-        }
+    let headers = match read_headers(&mut stream) {
+        Ok(h) => h,
+        Err(e) => { eprintln!("Failed to read headers: {}", e); return; }
     };
 
-    let request_line = request.lines().next().unwrap_or("").to_string();
-    println!(
-        "{} \"{}\" {} bytes",
-        peer_address,
-        request_line,
-        request.len()
-    );
+    let mut content_length = 0;
+    for line in headers.lines() {
+        if let Some(val) = line.strip_prefix("Content-Length:") {
+            if let Ok(len) = val.trim().parse::<usize>() {
+                content_length = len;
+            }
+            break;
+        }
+    }
+
+    if content_length > 0 {
+        if let Err(e) = read_body(&mut stream, content_length) {
+            eprintln!("Failed to read body: {}", e);
+            return;
+        }
+    }
+
+    let request_line = headers.lines().next().unwrap_or("");
+    println!("{} \"{}\" {} bytes", peer_address, request_line, headers.len() + content_length);
 
     if request_line.starts_with("GET /favicon.ico") {
         let _ = stream.write_all(FAVICON_HEADER);
         let _ = stream.write_all(FAVICON_PNG);
-        let _ = stream.flush();
-        return;
+    } else {
+        let _ = stream.write_all(OK_RESPONSE);
     }
-    let _ = stream.write_all(OK_RESPONSE);
     let _ = stream.flush();
 }
 
