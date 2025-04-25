@@ -184,11 +184,20 @@ fn handle_connection(mut stream: TcpStream, log_tx: Sender<String>) {
 
     let mut content_length = 0;
     for line in headers.lines() {
-        if let Some(val) = line.strip_prefix("Content-Length:") {
+        let lower = line.to_ascii_lowercase();
+        if let Some(val) = lower.strip_prefix("content-length:") {
+            if content_length != 0 {
+                // duplicated header ➜ 400
+                let _ = stream.write_all(RESPONSE_431);
+                return;
+            }
             if let Ok(len) = val.trim().parse::<usize>() {
                 content_length = len;
+            } else {
+                // malformed value ➜ 400
+                let _ = stream.write_all(RESPONSE_431);
+                return;
             }
-            break;
         }
     }
 
