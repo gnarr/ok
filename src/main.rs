@@ -18,28 +18,34 @@ const FAVICON_PNG: &[u8] = &[
     0x60, 0x82,
 ];
 fn read_request(stream: &mut TcpStream) -> std::io::Result<String> {
-    let mut buffer = Vec::new();
-    let mut temp = [0; 512];
+    let mut buffer = [0u8; MAX_HEADER_SIZE];
+    let mut total_read = 0;
+    let mut temp = [0u8; 512];
 
     loop {
         let n = stream.read(&mut temp)?;
         if n == 0 {
             break;
         }
-        buffer.extend_from_slice(&temp[..n]);
-
-        if buffer.windows(4).any(|w| w == b"\r\n\r\n") {
-            break;
-        }
-        if buffer.len() > MAX_HEADER_SIZE {
+        if total_read + n > MAX_HEADER_SIZE {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "Header too large",
             ));
         }
+        buffer[total_read..total_read + n].copy_from_slice(&temp[..n]);
+        total_read += n;
+
+        let start = total_read.saturating_sub(n + 3);
+        if buffer[start..total_read]
+            .windows(4)
+            .any(|w| w == b"\r\n\r\n")
+        {
+            break;
+        }
     }
 
-    Ok(String::from_utf8_lossy(&buffer).to_string())
+    Ok(String::from_utf8_lossy(&buffer[..total_read]).to_string())
 }
 
 fn write_response(stream: &mut TcpStream, content_type: &str, content: &[u8]) {
