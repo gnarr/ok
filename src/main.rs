@@ -40,6 +40,11 @@ Connection: close\r\n\
 X-Content-Type-Options: nosniff\r\n\
 X-Frame-Options: DENY\r\n\
 Content-Length: 0\r\n\r\n";
+const RESPONSE_501: &[u8] = b"HTTP/1.1 501 Not Implemented\r\n\
+Connection: close\r\n\
+X-Content-Type-Options: nosniff\r\n\
+X-Frame-Options: DENY\r\n\
+Content-Length: 0\r\n\r\n";
 
 const FAVICON_PNG: &[u8] = &[
     0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
@@ -166,6 +171,14 @@ fn handle_connection(mut stream: TcpStream) {
         },
     };
 
+    for line in headers.lines() {
+        let lower = line.to_ascii_lowercase();
+        if lower.starts_with("transfer-encoding:") && lower.contains("chunked") {
+            let _ = stream.write_all(RESPONSE_501);
+            return;
+        }
+    }
+
     let mut content_length = 0;
     for line in headers.lines() {
         if let Some(val) = line.strip_prefix("Content-Length:") {
@@ -217,8 +230,7 @@ fn main() -> std::io::Result<()> {
         senders.push(tx);
         thread::spawn(move || {
             for stream in rx {
-                let result = panic::catch_unwind(|| handle_connection(stream));
-                if let Err(err) = result {
+                if let Err(err) = panic::catch_unwind(|| handle_connection(stream)) {
                     eprintln!("Worker thread panicked: {:?}", err);
                 }
             }
