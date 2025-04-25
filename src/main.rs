@@ -1,15 +1,13 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::{
-    Arc, Mutex,
-    mpsc::{TrySendError, sync_channel},
-};
+use std::sync::mpsc::{TrySendError, sync_channel};
 use std::time::{Duration, Instant};
 use std::{env, thread};
 
 const MAX_HEADER_SIZE: usize = 8192;
 const MAX_BODY_SIZE: usize = 1 * 1024 * 1024;
 const QUEUE_CAPACITY: usize = 100;
+const POOL_SIZE: usize = 4;
 
 const OK_RESPONSE: &[u8] = b"HTTP/1.1 200 OK\r\n\
 Connection: close\r\n\
@@ -212,26 +210,25 @@ fn main() -> std::io::Result<()> {
     let listener = TcpListener::bind(&bind_addr)?;
     println!("Listening on {}", bind_addr);
 
-    let (sender, receiver) = sync_channel::<TcpStream>(QUEUE_CAPACITY);
-    let receiver = Arc::new(Mutex::new(receiver));
-    let pool_size = 4;
-    for _ in 0..pool_size {
-        let thread_receiver = Arc::clone(&receiver);
+    let mut senders = Vec::with_capacity(POOL_SIZE);
+    for _ in 0..POOL_SIZE {
+        let (tx, rx) = sync_channel::<TcpStream>(QUEUE_CAPACITY);
+        senders.push(tx);
         thread::spawn(move || {
-            loop {
-                let stream = thread_receiver.lock().unwrap().recv().unwrap();
+            for stream in rx {
                 handle_connection(stream);
             }
         });
     }
 
+    let mut next = 0;
     for incoming in listener.incoming() {
         match incoming {
-            Ok(stream) => match sender.try_send(stream) {
-                Ok(()) => {}
-                Err(TrySendError::Full(_)) => {}
-                Err(TrySendError::Disconnected(_)) => break,
-            },
+            Ok(stream) => {
+                let tx = &senders[next];
+                next = (next + 1) % POOL_SIZE;
+                if let Err(TrySendError::Full(_)) = tx.try_send(stream) {}
+            }
             Err(e) => eprintln!("Connection failed: {}", e),
         }
     }
