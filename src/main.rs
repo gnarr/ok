@@ -1,5 +1,6 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::panic;
 use std::sync::mpsc::{TrySendError, sync_channel};
 use std::time::{Duration, Instant};
 use std::{env, thread};
@@ -216,20 +217,20 @@ fn main() -> std::io::Result<()> {
         senders.push(tx);
         thread::spawn(move || {
             for stream in rx {
-                handle_connection(stream);
+                let result = panic::catch_unwind(|| handle_connection(stream));
+                if let Err(err) = result {
+                    eprintln!("Worker thread panicked: {:?}", err);
+                }
             }
         });
     }
 
     let mut next = 0;
     for incoming in listener.incoming() {
-        match incoming {
-            Ok(stream) => {
-                let tx = &senders[next];
-                next = (next + 1) % POOL_SIZE;
-                if let Err(TrySendError::Full(_)) = tx.try_send(stream) {}
-            }
-            Err(e) => eprintln!("Connection failed: {}", e),
+        if let Ok(stream) = incoming {
+            let tx = &senders[next];
+            next = (next + 1) % POOL_SIZE;
+            if let Err(TrySendError::Full(_)) = tx.try_send(stream) {}
         }
     }
     Ok(())
