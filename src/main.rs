@@ -2,6 +2,7 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::time::Duration;
 use std::{env, thread};
+use std::sync::{mpsc, Arc, Mutex};
 
 const MAX_HEADER_SIZE: usize = 8192;
 
@@ -107,10 +108,24 @@ fn main() -> std::io::Result<()> {
     let listener = TcpListener::bind(&bind_addr)?;
     println!("Listening on {}", bind_addr);
 
+    let (sender, receiver) = mpsc::channel::<TcpStream>();
+    let receiver = Arc::new(Mutex::new(receiver));
+    let pool_size = 4;
+    for _ in 0..pool_size {
+        let thread_receiver = Arc::clone(&receiver);
+        thread::spawn(move || loop {
+            let stream = thread_receiver.lock().unwrap().recv().unwrap();
+            handle_connection(stream);
+        });
+    }
+
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                thread::spawn(|| handle_connection(stream));
+                if sender.send(stream).is_err() {
+                    eprintln!("Worker threads have shut down");
+                    break;
+                }
             }
             Err(e) => eprintln!("Connection failed: {}", e),
         }
