@@ -246,6 +246,9 @@ fn handle_connection(mut stream: TcpStream, log_tx: SyncSender<String>, show_fav
         ("HEAD", _) => {
             let _ = stream.write_all(RESPONSE_404);
         }
+        (method, _) if method != "GET" && method != "HEAD" => {
+            let _ = stream.write_all(RESPONSE_501);
+        }
         _ => {
             if content_length > 0 {
                 if let Err(e) = read_body(&mut stream, content_length) {
