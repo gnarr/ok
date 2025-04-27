@@ -305,8 +305,16 @@ fn main() -> std::io::Result<()> {
         if let Ok(stream) = incoming {
             let tx = &senders[next];
             next = (next + 1) % pool_size;
-            if let Err(TrySendError::Full(_)) = tx.try_send(stream) {
-                let _ = log_tx.try_send("Connection dropped: worker queue is full".into());
+
+            match tx.try_send(stream) {
+                Ok(_) => {}
+                Err(TrySendError::Full(_)) => {
+                    let _ = log_tx.try_send("Connection dropped: worker queue is full".into());
+                }
+                Err(TrySendError::Disconnected(_)) => {
+                    let _ =
+                        log_tx.try_send("Worker queue disconnected – dropping connection".into());
+                }
             }
         }
     }
