@@ -220,7 +220,13 @@ fn handle_connection(mut stream: TcpStream, log_tx: SyncSender<String>, show_fav
         sanitize(request_line),
         byte_count
     );
-    let _ = log_tx.try_send(log_message);
+    match log_tx.try_send(log_message) {
+        Ok(_) => {}
+        Err(TrySendError::Full(_)) => {}
+        Err(TrySendError::Disconnected(_)) => {
+            eprintln!("log channel disconnected – log entry lost");
+        }
+    }
 
     let (method, path) = parse_request_line(request_line);
 
