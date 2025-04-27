@@ -10,13 +10,13 @@ const MAX_BODY_SIZE: usize = 1 * 1024 * 1024;
 const QUEUE_CAPACITY: usize = 100;
 const LOG_QUEUE_CAPACITY: usize = 100;
 
-const OK_RESPONSE: &[u8] = b"HTTP/1.1 200 OK\r\n\
+const OK_HEADER: &[u8] = b"HTTP/1.1 200 OK\r\n\
 Connection: close\r\n\
 Content-Type: text/plain; charset=utf-8\r\n\
 X-Content-Type-Options: nosniff\r\n\
 X-Frame-Options: DENY\r\n\
-Content-Length: 2\r\n\r\n\
-OK";
+Content-Length: 2\r\n\r\n";
+const OK_BODY: &[u8] = b"OK";
 
 const FAVICON_HEADER: &[u8] = b"HTTP/1.1 200 OK\r\n\
 Connection: close\r\n\
@@ -223,21 +223,33 @@ fn handle_connection(mut stream: TcpStream, log_tx: SyncSender<String>, show_fav
 
     let (method, path) = parse_request_line(request_line);
 
-    if method == "GET" && path == "/" {
-        let _ = stream.write_all(OK_RESPONSE);
-    } else if method == "GET" && path == "/favicon.ico" && show_favicon {
-        let _ = stream.write_all(FAVICON_HEADER);
-        let _ = stream.write_all(FAVICON_PNG);
-    } else {
-        if content_length > 0 {
-            if let Err(e) = read_body(&mut stream, content_length) {
-                if e.kind() == std::io::ErrorKind::InvalidData {
-                    let _ = stream.write_all(RESPONSE_413);
-                }
-                return;
+    match (method, path) {
+        (m @ ("GET" | "HEAD"), "/") => {
+            let _ = stream.write_all(OK_HEADER);
+            if m == "GET" {
+                let _ = stream.write_all(OK_BODY);
             }
         }
-        let _ = stream.write_all(RESPONSE_404);
+        (m @ ("GET" | "HEAD"), "/favicon.ico") if show_favicon => {
+            let _ = stream.write_all(FAVICON_HEADER);
+            if m == "GET" {
+                let _ = stream.write_all(FAVICON_PNG);
+            }
+        }
+        ("HEAD", _) => {
+            let _ = stream.write_all(RESPONSE_404);
+        }
+        _ => {
+            if content_length > 0 {
+                if let Err(e) = read_body(&mut stream, content_length) {
+                    if e.kind() == std::io::ErrorKind::InvalidData {
+                        let _ = stream.write_all(RESPONSE_413);
+                    }
+                    return;
+                }
+            }
+            let _ = stream.write_all(RESPONSE_404);
+        }
     }
     let _ = stream.flush();
 }
