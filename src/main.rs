@@ -195,7 +195,8 @@ fn handle_connection(mut stream: TcpStream, log_tx: SyncSender<String>, show_fav
 
     let mut content_length = 0;
     for line in headers.lines() {
-        if let Some(val) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+        if line.len() >= 15 && line[..15].eq_ignore_ascii_case("content-length:") {
+            let val = &line[15..];
             if content_length != 0 {
                 let _ = stream.write_all(RESPONSE_431);
                 return;
