@@ -209,15 +209,6 @@ fn handle_connection(mut stream: TcpStream, log_tx: SyncSender<String>, show_fav
     );
     let _ = log_tx.try_send(log_message);
 
-    if content_length > 0 {
-        if let Err(e) = read_body(&mut stream, content_length) {
-            if e.kind() == std::io::ErrorKind::InvalidData {
-                let _ = stream.write_all(RESPONSE_413);
-            }
-            return;
-        }
-    }
-
     let parts: Vec<&str> = request_line.split_whitespace().collect();
     let method = parts.get(0).unwrap_or(&"");
     let path = parts.get(1).unwrap_or(&"");
@@ -228,6 +219,14 @@ fn handle_connection(mut stream: TcpStream, log_tx: SyncSender<String>, show_fav
         let _ = stream.write_all(FAVICON_HEADER);
         let _ = stream.write_all(FAVICON_PNG);
     } else {
+        if content_length > 0 {
+            if let Err(e) = read_body(&mut stream, content_length) {
+                if e.kind() == std::io::ErrorKind::InvalidData {
+                    let _ = stream.write_all(RESPONSE_413);
+                }
+                return;
+            }
+        }
         let _ = stream.write_all(RESPONSE_404);
     }
     let _ = stream.flush();
