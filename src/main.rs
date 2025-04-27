@@ -25,6 +25,12 @@ X-Content-Type-Options: nosniff\r\n\
 X-Frame-Options: DENY\r\n\
 Content-Length: 130\r\n\r\n";
 
+const RESPONSE_404: &[u8] = b"HTTP/1.1 404 Not Found\r\n\
+Connection: close\r\n\
+X-Content-Type-Options: nosniff\r\n\
+X-Frame-Options: DENY\r\n\
+Content-Length: 0\r\n\r\n";
+
 const RESPONSE_408: &[u8] = b"HTTP/1.1 408 Request Timeout\r\n\
 Connection: close\r\n\
 X-Content-Type-Options: nosniff\r\n\
@@ -193,12 +199,15 @@ fn handle_connection(mut stream: TcpStream, log_tx: Sender<String>) {
         }
     }
 
-    let peer_address = get_client_address(&mut stream, &headers);
-    let request_line_raw = headers.lines().next().unwrap_or("");
-    let request_line = sanitize(request_line_raw);
+    let peer = get_client_address(&mut stream, &headers);
+    let request_line = headers.lines().next().unwrap_or("");
     let byte_count = headers.len() + content_length;
-
-    let log_message = format!("{} \"{}\" {} bytes", peer_address, request_line, byte_count);
+    let log_message = format!(
+        "{} \"{}\" {} bytes",
+        peer,
+        sanitize(request_line),
+        byte_count
+    );
     let _ = log_tx.send(log_message);
 
     if content_length > 0 {
@@ -209,12 +218,18 @@ fn handle_connection(mut stream: TcpStream, log_tx: Sender<String>) {
             return;
         }
     }
+    
+    let parts: Vec<&str> = request_line.split_whitespace().collect();
+    let method = parts.get(0).unwrap_or(&"");
+    let path = parts.get(1).unwrap_or(&"");
 
-    if request_line.starts_with("GET /favicon.ico") {
+    if *method == "GET" && *path == "/" {
+        let _ = stream.write_all(OK_RESPONSE);
+    } else if *method == "GET" && *path == "/favicon.ico" {
         let _ = stream.write_all(FAVICON_HEADER);
         let _ = stream.write_all(FAVICON_PNG);
     } else {
-        let _ = stream.write_all(OK_RESPONSE);
+        let _ = stream.write_all(RESPONSE_404);
     }
     let _ = stream.flush();
 }
