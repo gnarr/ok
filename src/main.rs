@@ -255,7 +255,7 @@ fn main() -> std::io::Result<()> {
             let tx = &senders[next];
             next = (next + 1) % POOL_SIZE;
             if let Err(TrySendError::Full(_)) = tx.try_send(stream) {
-                let _ = log_tx.send(format!("Connection dropped: worker queue is full"));
+                let _ = log_tx.send("Connection dropped: worker queue is full".into());
             }
         }
     }
