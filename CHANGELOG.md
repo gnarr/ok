@@ -2,6 +2,42 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2025-04-27
+
+### 🚀 Features
+
+- Respond with 404 to unknown paths
+- Add `SHOW_FAVICON` environment variable with default value of `true`
+- Use `sync_channel` for logs with try_send
+- THREAD_POOL_SIZE is now configurable via env
+- Respond correctly to HEAD requests
+
+### 🐛 Bug Fixes
+
+- Do not attempt to consume body on GET for / or /favicon.ico
+- Avoid per-line heap allocations when parsing Content-Length
+- Gracefully handle a disconnected worker queue
+- Validate PORT env var before binding
+- Handle try_send errors explicitly
+- Return 501 for unsupported HTTP methods
+
+### 🚜 Refactor
+
+- Simplify get_client_address
+- Simplify sanitize method
+- Use format macro instead of string.into
+- Use string.into for port default value
+- Use match ok/err for getting content-length header
+
+### ⚡ Performance
+
+- Skip allocating on heap for method and path
+- Add 24h caching header for favicon
+
+### ⚙️ Miscellaneous Tasks
+
+- Formatting fixes
+
 ## [0.2.0] - 2025-04-25
 
 ### 🚀 Features
@@ -37,6 +73,11 @@ All notable changes to this project will be documented in this file.
 ### ⚡ Performance
 
 - Pre-build byte slices
+
+### ⚙️ Miscellaneous Tasks
+
+- Update changelog for v0.2.0
+- Release ok version 0.2.0
 
 ## [0.1.10] - 2025-04-23
 
