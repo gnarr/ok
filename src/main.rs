@@ -61,13 +61,7 @@ const FAVICON_PNG: &[u8] = &[
 fn sanitize(input: &str) -> String {
     input
         .chars()
-        .map(|c| {
-            if c.is_control() || c == '"' {
-                '?' // replace with placeholder
-            } else {
-                c
-            }
-        })
+        .map(|c| if c.is_control() || c == '"' { '?' } else { c })
         .collect()
 }
 
