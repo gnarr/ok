@@ -152,7 +152,7 @@ fn get_client_address(stream: &mut TcpStream, headers: &str) -> String {
         .unwrap_or_else(|_| "unknown".into())
 }
 
-fn handle_connection(mut stream: TcpStream, log_tx: Sender<String>) {
+fn handle_connection(mut stream: TcpStream, log_tx: Sender<String>, show_favicon: bool) {
     let timeout = Duration::from_secs(5);
     stream.set_read_timeout(Some(timeout)).ok();
     stream.set_write_timeout(Some(timeout)).ok();
@@ -223,7 +223,7 @@ fn handle_connection(mut stream: TcpStream, log_tx: Sender<String>) {
 
     if *method == "GET" && *path == "/" {
         let _ = stream.write_all(OK_RESPONSE);
-    } else if *method == "GET" && *path == "/favicon.ico" {
+    } else if *method == "GET" && *path == "/favicon.ico" && show_favicon {
         let _ = stream.write_all(FAVICON_HEADER);
         let _ = stream.write_all(FAVICON_PNG);
     } else {
@@ -235,6 +235,9 @@ fn handle_connection(mut stream: TcpStream, log_tx: Sender<String>) {
 fn main() -> std::io::Result<()> {
     let port = env::var("PORT").unwrap_or_else(|_| "8080".into());
     let bind_addr = format!("0.0.0.0:{}", port);
+    let show_favicon = env::var("SHOW_FAVICON")
+        .map(|v| !v.eq_ignore_ascii_case("false"))
+        .unwrap_or(true);
 
     let listener = TcpListener::bind(&bind_addr)?;
     println!("Listening on {}", bind_addr);
@@ -249,13 +252,14 @@ fn main() -> std::io::Result<()> {
     let mut senders = Vec::with_capacity(POOL_SIZE);
     for _ in 0..POOL_SIZE {
         let (tx, rx) = sync_channel::<TcpStream>(QUEUE_CAPACITY);
-        senders.push(tx);
         let log_tx_clone = log_tx.clone();
+        let show_favicon = show_favicon;
+        senders.push(tx);
         thread::spawn(move || {
             for stream in rx {
-                if let Err(err) =
-                    panic::catch_unwind(|| handle_connection(stream, log_tx_clone.clone()))
-                {
+                if let Err(err) = panic::catch_unwind(|| {
+                    handle_connection(stream, log_tx_clone.clone(), show_favicon)
+                }) {
                     eprintln!("Worker thread panicked: {:?}", err);
                 }
             }
