@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::panic;
-use std::sync::mpsc::{channel, sync_channel, Sender, TrySendError};
+use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
 use std::time::{Duration, Instant};
 use std::{env, thread};
 
@@ -9,6 +9,7 @@ const MAX_HEADER_SIZE: usize = 8192;
 const MAX_BODY_SIZE: usize = 1 * 1024 * 1024;
 const QUEUE_CAPACITY: usize = 100;
 const POOL_SIZE: usize = 4;
+const LOG_QUEUE_CAPACITY: usize = 100;
 
 const OK_RESPONSE: &[u8] = b"HTTP/1.1 200 OK\r\n\
 Connection: close\r\n\
@@ -152,7 +153,7 @@ fn get_client_address(stream: &mut TcpStream, headers: &str) -> String {
         .unwrap_or_else(|_| "unknown".into())
 }
 
-fn handle_connection(mut stream: TcpStream, log_tx: Sender<String>, show_favicon: bool) {
+fn handle_connection(mut stream: TcpStream, log_tx: SyncSender<String>, show_favicon: bool) {
     let timeout = Duration::from_secs(5);
     stream.set_read_timeout(Some(timeout)).ok();
     stream.set_write_timeout(Some(timeout)).ok();
@@ -206,7 +207,7 @@ fn handle_connection(mut stream: TcpStream, log_tx: Sender<String>, show_favicon
         sanitize(request_line),
         byte_count
     );
-    let _ = log_tx.send(log_message);
+    let _ = log_tx.try_send(log_message);
 
     if content_length > 0 {
         if let Err(e) = read_body(&mut stream, content_length) {
@@ -216,7 +217,7 @@ fn handle_connection(mut stream: TcpStream, log_tx: Sender<String>, show_favicon
             return;
         }
     }
-    
+
     let parts: Vec<&str> = request_line.split_whitespace().collect();
     let method = parts.get(0).unwrap_or(&"");
     let path = parts.get(1).unwrap_or(&"");
@@ -242,7 +243,7 @@ fn main() -> std::io::Result<()> {
     let listener = TcpListener::bind(&bind_addr)?;
     println!("Listening on {}", bind_addr);
 
-    let (log_tx, log_rx) = channel::<String>();
+    let (log_tx, log_rx) = sync_channel::<String>(LOG_QUEUE_CAPACITY);
     thread::spawn(move || {
         for msg in log_rx {
             println!("{}", msg);
@@ -272,7 +273,7 @@ fn main() -> std::io::Result<()> {
             let tx = &senders[next];
             next = (next + 1) % POOL_SIZE;
             if let Err(TrySendError::Full(_)) = tx.try_send(stream) {
-                let _ = log_tx.send("Connection dropped: worker queue is full".into());
+                let _ = log_tx.try_send("Connection dropped: worker queue is full".into());
             }
         }
     }
