@@ -72,6 +72,19 @@ fn sanitize(input: &str) -> String {
         .collect()
 }
 
+fn parse_request_line(request_line: &str) -> (&str, &str) {
+    if let Some(method_end_index) = request_line.find(' ') {
+        let method = &request_line[..method_end_index];
+        let rest = &request_line[method_end_index + 1..];
+        if let Some(path_end_index) = rest.find(' ') {
+            let path = &rest[..path_end_index];
+            return (method, path);
+        }
+        return (method, rest);
+    }
+    ("", "")
+}
+
 fn read_headers(stream: &mut TcpStream) -> std::io::Result<String> {
     let mut buffer = [0u8; MAX_HEADER_SIZE];
     let mut total_read = 0;
@@ -209,13 +222,11 @@ fn handle_connection(mut stream: TcpStream, log_tx: SyncSender<String>, show_fav
     );
     let _ = log_tx.try_send(log_message);
 
-    let parts: Vec<&str> = request_line.split_whitespace().collect();
-    let method = parts.get(0).unwrap_or(&"");
-    let path = parts.get(1).unwrap_or(&"");
+    let (method, path) = parse_request_line(request_line);
 
-    if *method == "GET" && *path == "/" {
+    if method == "GET" && path == "/" {
         let _ = stream.write_all(OK_RESPONSE);
-    } else if *method == "GET" && *path == "/favicon.ico" && show_favicon {
+    } else if method == "GET" && path == "/favicon.ico" && show_favicon {
         let _ = stream.write_all(FAVICON_HEADER);
         let _ = stream.write_all(FAVICON_PNG);
     } else {
