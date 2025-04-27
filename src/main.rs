@@ -8,7 +8,6 @@ use std::{env, thread};
 const MAX_HEADER_SIZE: usize = 8192;
 const MAX_BODY_SIZE: usize = 1 * 1024 * 1024;
 const QUEUE_CAPACITY: usize = 100;
-const POOL_SIZE: usize = 4;
 const LOG_QUEUE_CAPACITY: usize = 100;
 
 const OK_RESPONSE: &[u8] = b"HTTP/1.1 200 OK\r\n\
@@ -31,7 +30,6 @@ Connection: close\r\n\
 X-Content-Type-Options: nosniff\r\n\
 X-Frame-Options: DENY\r\n\
 Content-Length: 0\r\n\r\n";
-
 const RESPONSE_408: &[u8] = b"HTTP/1.1 408 Request Timeout\r\n\
 Connection: close\r\n\
 X-Content-Type-Options: nosniff\r\n\
@@ -249,9 +247,20 @@ fn main() -> std::io::Result<()> {
     let show_favicon = env::var("SHOW_FAVICON")
         .map(|v| !v.eq_ignore_ascii_case("false"))
         .unwrap_or(true);
+    let pool_size = env::var("THREAD_POOL_SIZE")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or_else(|| {
+            thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4)
+        });
 
     let listener = TcpListener::bind(&bind_addr)?;
-    println!("Listening on {}", bind_addr);
+    println!(
+        "Listening on {} with {} worker threads",
+        bind_addr, pool_size
+    );
 
     let (log_tx, log_rx) = sync_channel::<String>(LOG_QUEUE_CAPACITY);
     thread::spawn(move || {
@@ -260,12 +269,12 @@ fn main() -> std::io::Result<()> {
         }
     });
 
-    let mut senders = Vec::with_capacity(POOL_SIZE);
-    for _ in 0..POOL_SIZE {
+    let mut senders = Vec::with_capacity(pool_size);
+    for _ in 0..pool_size {
         let (tx, rx) = sync_channel::<TcpStream>(QUEUE_CAPACITY);
+        senders.push(tx.clone());
         let log_tx_clone = log_tx.clone();
         let show_favicon = show_favicon;
-        senders.push(tx);
         thread::spawn(move || {
             for stream in rx {
                 if let Err(err) = panic::catch_unwind(|| {
@@ -281,7 +290,7 @@ fn main() -> std::io::Result<()> {
     for incoming in listener.incoming() {
         if let Ok(stream) = incoming {
             let tx = &senders[next];
-            next = (next + 1) % POOL_SIZE;
+            next = (next + 1) % pool_size;
             if let Err(TrySendError::Full(_)) = tx.try_send(stream) {
                 let _ = log_tx.try_send("Connection dropped: worker queue is full".into());
             }
