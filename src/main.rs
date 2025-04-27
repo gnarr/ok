@@ -256,7 +256,10 @@ fn handle_connection(mut stream: TcpStream, log_tx: SyncSender<String>, show_fav
 }
 
 fn main() -> std::io::Result<()> {
-    let port = env::var("PORT").unwrap_or_else(|_| "8080".into());
+    let port: u16 = env::var("PORT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(8080);
     let bind_addr = format!("0.0.0.0:{}", port);
     let show_favicon = env::var("SHOW_FAVICON")
         .map(|v| !v.eq_ignore_ascii_case("false"))
