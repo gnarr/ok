@@ -220,7 +220,7 @@ fn handle_connection(mut stream: TcpStream, log_tx: Sender<String>) {
 }
 
 fn main() -> std::io::Result<()> {
-    let port = env::var("PORT").unwrap_or_else(|_| "8080".to_string());
+    let port = env::var("PORT").unwrap_or_else(|_| "8080".into());
     let bind_addr = format!("0.0.0.0:{}", port);
 
     let listener = TcpListener::bind(&bind_addr)?;
