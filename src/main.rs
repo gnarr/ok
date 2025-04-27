@@ -21,6 +21,7 @@ OK";
 const FAVICON_HEADER: &[u8] = b"HTTP/1.1 200 OK\r\n\
 Connection: close\r\n\
 Content-Type: image/png\r\n\
+Cache-Control: public, max-age=86400\r\n\
 X-Content-Type-Options: nosniff\r\n\
 X-Frame-Options: DENY\r\n\
 Content-Length: 130\r\n\r\n";
