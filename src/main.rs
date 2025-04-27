@@ -137,24 +137,19 @@ fn read_body(stream: &mut TcpStream, mut remaining: usize) -> std::io::Result<()
     Ok(())
 }
 
-fn get_client_address(stream: &mut TcpStream, headers: &String) -> String {
-    let mut client_ip: Option<String> = None;
+fn get_client_address(stream: &mut TcpStream, headers: &str) -> String {
     for line in headers.lines() {
         if let Some(val) = line
             .strip_prefix("X-Forwarded-For:")
             .or_else(|| line.strip_prefix("x-forwarded-for:"))
         {
-            client_ip = Some(val.trim().split(',').next().unwrap_or("").to_string());
-            break;
+            return sanitize(val.trim().split(',').next().unwrap_or(""));
         }
     }
-    let fallback_ip = stream
+    stream
         .peer_addr()
-        .map(|a| a.to_string())
-        .unwrap_or_else(|_| "unknown".into());
-    let peer_address_raw = client_ip.unwrap_or(fallback_ip);
-    let peer_address = sanitize(&peer_address_raw);
-    peer_address
+        .map(|a| sanitize(&a.to_string()))
+        .unwrap_or_else(|_| "unknown".into())
 }
 
 fn handle_connection(mut stream: TcpStream, log_tx: Sender<String>) {
