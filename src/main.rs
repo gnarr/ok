@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::panic;
-use std::sync::mpsc::{TrySendError, sync_channel, Sender, channel};
+use std::sync::mpsc::{channel, sync_channel, Sender, TrySendError};
 use std::time::{Duration, Instant};
 use std::{env, thread};
 
@@ -251,7 +251,9 @@ fn main() -> std::io::Result<()> {
         let log_tx_clone = log_tx.clone();
         thread::spawn(move || {
             for stream in rx {
-                if let Err(err) = panic::catch_unwind(|| handle_connection(stream, log_tx_clone.clone())) {
+                if let Err(err) =
+                    panic::catch_unwind(|| handle_connection(stream, log_tx_clone.clone()))
+                {
                     eprintln!("Worker thread panicked: {:?}", err);
                 }
             }
