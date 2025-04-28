@@ -1,4 +1,4 @@
-# Ok — minimal zero-dependency Rust web-server
+# Ok — minimal zero-dependency Rust webserver
 
 [![docker arch][8]][7]
 [![docker size][9]][7]
@@ -28,7 +28,7 @@
 [12]: https://hub.docker.com/r/gnarr/ok/tags
 
 
-A minimal Rust web server that responds with `OK` on HTTP request. It's designed to be a tiny, zero-dependency binary that listens on a configurable port.
+A minimal Rust webserver that responds with `OK` on HTTP request. It's designed to be a tiny, zero-dependency binary that listens on a configurable port.
 
 ## Quick Start
 
