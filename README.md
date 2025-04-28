@@ -28,7 +28,7 @@
 [12]: https://hub.docker.com/r/gnarr/ok/tags
 
 
-A minimal Rust web server that responds with `OK` on any HTTP request. It's designed to be a tiny, zero-dependency binary that listens on a configurable port.
+A minimal Rust web server that responds with `OK` on HTTP request. It's designed to be a tiny, zero-dependency binary that listens on a configurable port.
 
 ## Quick Start
 
