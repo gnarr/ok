@@ -1,4 +1,17 @@
-# Ok Server
+# Ok — minimal zero-dependency Rust web-server
+
+![docker arch](https://img.shields.io/badge/platform-amd64%20%7C%20arm64%20%7C%20armv7-brightgreen)
+![docker size](https://img.shields.io/docker/image-size/gnarr/ok/latest)
+![docker pulls](https://img.shields.io/docker/pulls/gnarr/ok)
+![docker version](https://img.shields.io/docker/v/gnarr/ok?sort=semver)
+
+![release and build](https://img.shields.io/github/actions/workflow/status/gnarr/ok/release.yml?branch=main&label=release%20and%20build)
+![unsafe](https://img.shields.io/badge/unsafe-0%25-success)
+![license](https://img.shields.io/badge/license-MIT-blue)
+![rustc](https://img.shields.io/badge/rustc-1.74%2B-orange)
+![release](https://img.shields.io/github/v/release/gnarr/ok?include_prereleases)
+
+![contributions](https://img.shields.io/badge/contributions-welcome-brightgreen)
 
 A minimal Rust web server that responds with `OK` on any HTTP request. It's designed to be a tiny, zero-dependency binary that listens on a configurable port.
 
