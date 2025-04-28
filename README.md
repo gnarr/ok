@@ -68,7 +68,7 @@ Verify:
 
 ```sh
 curl http://localhost:8080
-# Should print 'OK'
+# Should return 'OK' with HTTP 200
 ```
 
 ### Docker Compose
