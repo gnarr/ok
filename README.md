@@ -30,6 +30,14 @@
 
 A minimal Rust web server that responds with `OK` on any HTTP request. It's designed to be a tiny, zero-dependency binary that listens on a configurable port.
 
+## Quick Start
+
+```sh
+docker run -d -p 8080:8080 gnarr/ok
+curl http://localhost:8080
+# OK
+```
+
 ## Features
 
 - Single-source-file Rust server (no external crates)
