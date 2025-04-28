@@ -265,6 +265,10 @@ fn handle_connection(mut stream: TcpStream, log_tx: SyncSender<String>, show_fav
 }
 
 fn main() -> std::io::Result<()> {
+    let mut args = std::env::args();
+    if args.len() == 2 && args.nth(1).as_deref() == Some("--health-check") {
+        std::process::exit(0);
+    }
     let port: u16 = env::var("PORT")
         .ok()
         .and_then(|v| v.parse().ok())
