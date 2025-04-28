@@ -24,3 +24,10 @@ EXPOSE 8080
 USER nonroot
 
 ENTRYPOINT ["/usr/local/bin/ok_server"]
+
+HEALTHCHECK \
+  --interval=30s \
+  --timeout=5s \
+  --start-period=10s \
+  --retries=3 \
+  CMD ["/usr/local/bin/ok_server","--health-check"]
