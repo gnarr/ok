@@ -1,17 +1,32 @@
 # Ok — minimal zero-dependency Rust web-server
 
-![docker arch](https://img.shields.io/badge/platform-amd64%20%7C%20arm64%20%7C%20armv7-brightgreen)
-![docker size](https://img.shields.io/docker/image-size/gnarr/ok/latest)
-![docker pulls](https://img.shields.io/docker/pulls/gnarr/ok)
-![docker version](https://img.shields.io/docker/v/gnarr/ok?sort=semver)
+[![docker arch][8]][7]
+[![docker size][9]][7]
+[![docker pulls][10]][7]
+[![docker version][11]][12]
 
-![release and build](https://img.shields.io/github/actions/workflow/status/gnarr/ok/release.yml?branch=main&label=release%20and%20build)
+[![release and build][3]][4]
 ![unsafe](https://img.shields.io/badge/unsafe-0%25-success)
-![license](https://img.shields.io/badge/license-MIT-blue)
+[![license][5]][6]
 ![rustc](https://img.shields.io/badge/rustc-1.74%2B-orange)
 ![release](https://img.shields.io/github/v/release/gnarr/ok?include_prereleases)
 
-![contributions](https://img.shields.io/badge/contributions-welcome-brightgreen)
+[![contributions][1]][2]
+
+[1]: https://img.shields.io/badge/contributions-welcome-brightgreen
+[2]: https://github.com/gnarr/ok
+[3]: https://img.shields.io/github/actions/workflow/status/gnarr/ok/release.yml?branch=main&label=release%20and%20build
+[4]: https://github.com/gnarr/ok/actions/workflows/release.yml
+[5]: https://img.shields.io/badge/license-MIT-blue
+[6]: https://github.com/gnarr/ok/blob/main/LICENSE
+
+[7]: https://hub.docker.com/r/gnarr/ok
+[8]: https://img.shields.io/badge/platform-amd64%20%7C%20arm64%20%7C%20armv7-brightgreen
+[9]: https://img.shields.io/docker/image-size/gnarr/ok/latest
+[10]: https://img.shields.io/docker/pulls/gnarr/ok
+[11]: https://img.shields.io/docker/v/gnarr/ok?sort=semver
+[12]: https://hub.docker.com/r/gnarr/ok/tags
+
 
 A minimal Rust web server that responds with `OK` on any HTTP request. It's designed to be a tiny, zero-dependency binary that listens on a configurable port.
 
