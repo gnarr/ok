@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] - 2025-04-28
+
+### ⚙️ Miscellaneous Tasks
+
+- Add badges to readme
+- Add links to badges
+- Remove backslash from block marker
+- Fix wording in curl example
+- Change environment to map in compose example
+- Add configuration table
+- Add quick start guide
+- *(build)* Add automatic README update for docker hub
+- Change description wording to be more precise
+- Use webserver everywhere
+
 ## [0.3.0] - 2025-04-27
 
 ### 🚀 Features
@@ -37,6 +52,8 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - Formatting fixes
+- Update changelog for v0.3.0
+- Release ok version 0.3.0
 
 ## [0.2.0] - 2025-04-25
 
