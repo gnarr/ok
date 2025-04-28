@@ -75,7 +75,7 @@ curl http://localhost:8080
 
 Create a `docker-compose.yml` in your project root:
 
-```yaml\
+```yaml
 services:
   ok-server:
     image: gnarr/ok:latest
