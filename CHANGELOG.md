@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.2] - 2025-04-28
+
+### ⚙️ Miscellaneous Tasks
+
+- Update dockerhub-description to version 4
+
 ## [0.3.1] - 2025-04-28
 
 ### ⚙️ Miscellaneous Tasks
@@ -16,6 +22,8 @@ All notable changes to this project will be documented in this file.
 - *(build)* Add automatic README update for docker hub
 - Change description wording to be more precise
 - Use webserver everywhere
+- Update changelog for v0.3.1
+- Release ok version 0.3.1
 
 ## [0.3.0] - 2025-04-27
 
