@@ -2,11 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2025-04-28
+
+### 🚀 Features
+
+- Add health-check
+
 ## [0.3.2] - 2025-04-28
 
 ### ⚙️ Miscellaneous Tasks
 
 - Update dockerhub-description to version 4
+- Update changelog for v0.3.2
+- Release ok version 0.3.2
 
 ## [0.3.1] - 2025-04-28
 
