@@ -33,8 +33,15 @@ A minimal Rust web server that responds with `OK` on any HTTP request. It's desi
 ## Features
 
 - Single-source-file Rust server (no external crates)
-- Configurable port via `PORT` environment variable (default: `8080`)
 - Multi‑architecture Docker images (amd64, arm64, arm/v7) via Docker Buildx
+
+## Configuration
+
+Variable | Description | Default
+|---|---|---|
+PORT | TCP port the server binds to | 8080 
+SHOW_FAVICON | Whether to serve /favicon.ico (set to "false" to disable it) | true (any value other than "false" enables it) 
+THREAD_POOL_SIZE | Number of worker threads to spawn (falls back to CPU count or 4) | CPU core count (via available_parallelism) or 4 if unknown 
 
 ## Usage
 
