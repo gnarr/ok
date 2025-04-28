@@ -263,3 +263,12 @@ jobs:
             gnarr/ok:latest
           build-args: |
             BINARY_NAME=ok_server
+      - name: Update DockerHub README
+        uses: peter-evans/dockerhub-description@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: gnarr/ok
+          short-description: "A minimal Rust webserver that returns OK and status 200."
+          readme-filepath: ./README.md
+      
