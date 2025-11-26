@@ -52,6 +52,13 @@ jobs:
           cargo install cargo-release --version ${{ env.CARGO_RELEASE_VERSION }} --locked
           cargo install git-cliff --version ${{ env.GIT_CLIFF_VERSION }} --locked
 
+      - name: Ensure cargo-edit is available
+        if: steps.version_info.outputs.release_needed == 'true'
+        run: |
+          if ! cargo set-version -V >/dev/null 2>&1; then
+            cargo install cargo-edit --locked
+          fi
+
       - name: Configure Git
         run: |
           git config user.name "github-actions[bot]"
