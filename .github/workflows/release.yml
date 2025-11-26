@@ -103,10 +103,6 @@ jobs:
           git cliff --output RELEASE.md --unreleased --tag v${{ steps.version_info.outputs.new_version }}
           git cliff --output CHANGELOG.md --tag v${{ steps.version_info.outputs.new_version }}
 
-      - name: Set crate version to new version
-        if: steps.version_info.outputs.release_needed == 'true'
-        run: cargo set-version ${{ steps.version_info.outputs.new_version }}
-
       - name: Stage changelog
         if: steps.version_info.outputs.release_needed == 'true'
         run: git add CHANGELOG.md
