@@ -279,7 +279,7 @@ jobs:
       project_name: ${{ steps.pkg.outputs.project_name }}
 
   docker_image:
-    needs: [release, linux-amd64, linux-arm64, linux-armv7]
+    needs: [release, linux-build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
