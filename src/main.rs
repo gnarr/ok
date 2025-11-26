@@ -220,7 +220,7 @@ mod tests {
         let server = thread::spawn(move || {
             let (mut stream, _) = listener.accept().unwrap();
             stream
-                .set_read_timeout(Some(Duration::from_millis(5)))
+                .set_read_timeout(Some(Duration::from_millis(100)))
                 .ok();
             let deadline = Instant::now() - Duration::from_millis(1);
             read_body(&mut stream, 1, deadline)
