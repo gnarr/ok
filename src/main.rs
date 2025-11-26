@@ -691,43 +691,14 @@ fn main() -> std::io::Result<()> {
 
     let mut next = 0;
     for incoming in listener.incoming() {
-        let mut stream = match incoming {
+        let stream = match incoming {
             Ok(s) => s,
             Err(e) => {
                 let _ = log_tx.try_send(format!("Accept error: {}", e));
                 continue;
             }
         };
-        let mut dispatched = false;
-        for i in 0..senders.len() {
-            let idx = (next + i) % senders.len();
-
-            let Some(tx) = senders[idx].as_ref() else {
-                continue;
-            };
-
-            match tx.try_send(stream) {
-                Ok(_) => {
-                    dispatched = true;
-                    break;
-                }
-                Err(TrySendError::Full(returned)) => {
-                    stream = returned;
-                    continue;
-                }
-                Err(TrySendError::Disconnected(returned)) => {
-                    stream = returned;
-                    let _ = log_tx.try_send(format!("Worker {} disconnected", idx));
-                    senders[idx] = None;
-                    continue;
-                }
-            }
-        }
-        next = (next + 1) % senders.len();
-        if !dispatched {
-            let _ = log_tx
-                .try_send("Connection dropped: all workers unavailable or queues full".into());
-        }
+        dispatch_connection(&mut senders, stream, &log_tx, &mut next);
     }
     Ok(())
 }
