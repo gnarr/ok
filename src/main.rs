@@ -107,10 +107,50 @@ fn compute_pool_size(env_value: Option<String>, available_parallelism: Option<us
         .unwrap_or(4)
 }
 
+fn dispatch_connection(
+    senders: &mut [Option<SyncSender<TcpStream>>],
+    mut stream: TcpStream,
+    log_tx: &SyncSender<String>,
+    next: &mut usize,
+) -> bool {
+    let mut dispatched = false;
+    for i in 0..senders.len() {
+        let idx = (*next + i) % senders.len();
+
+        let Some(tx) = senders[idx].as_ref() else {
+            continue;
+        };
+
+        match tx.try_send(stream) {
+            Ok(_) => {
+                dispatched = true;
+                break;
+            }
+            Err(TrySendError::Full(returned)) => {
+                stream = returned;
+                continue;
+            }
+            Err(TrySendError::Disconnected(returned)) => {
+                stream = returned;
+                let _ = log_tx.try_send(format!("Worker {} disconnected", idx));
+                senders[idx] = None;
+                continue;
+            }
+        }
+    }
+    *next = (*next + 1) % senders.len();
+    if !dispatched {
+        let _ = log_tx
+            .try_send("Connection dropped: all workers unavailable or queues full".into());
+    }
+    dispatched
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        compute_pool_size, handle_connection, parse_request_line, read_body, MAX_BODY_SIZE,
+        compute_pool_size, dispatch_connection, handle_connection, parse_request_line, read_body,
+        MAX_BODY_SIZE,
     };
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
@@ -311,6 +351,88 @@ mod tests {
             "unexpected response: {}",
             response
         );
+    }
+
+    fn make_stream_pair() -> (TcpStream, TcpStream) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = TcpStream::connect(addr).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        (client, server)
+    }
+
+    #[test]
+    fn retries_across_workers_when_queue_full() {
+        let (tx1, rx1) = sync_channel::<TcpStream>(1);
+        let (tx2, rx2) = sync_channel::<TcpStream>(1);
+        let mut senders = vec![Some(tx1), Some(tx2)];
+        let (client1, _server1) = make_stream_pair();
+        // Fill first queue
+        senders[0].as_ref().unwrap().try_send(client1).unwrap();
+
+        let (client2, server2) = make_stream_pair();
+        let (log_tx, _log_rx) = sync_channel::<String>(10);
+        let mut next = 0;
+
+        let dispatched = dispatch_connection(&mut senders, client2, &log_tx, &mut next);
+        assert!(dispatched);
+        let recv2 = rx2.try_recv().expect("worker 2 should receive");
+        assert_eq!(recv2.peer_addr().unwrap(), server2.local_addr().unwrap());
+        assert!(rx1.try_recv().is_ok());
+    }
+
+    #[test]
+    fn advances_round_robin_counter() {
+        let (tx, rx) = sync_channel::<TcpStream>(1);
+        let mut senders = vec![Some(tx)];
+        let (client, _server) = make_stream_pair();
+        let (log_tx, _log_rx) = sync_channel::<String>(10);
+        let mut next = 0;
+        let dispatched = dispatch_connection(&mut senders, client, &log_tx, &mut next);
+        assert!(dispatched);
+        assert_eq!(next, 0);
+        // drain to avoid unused warnings
+        let _ = rx.try_recv();
+    }
+
+    #[test]
+    fn drops_after_all_workers_tried() {
+        let (tx1, rx1) = sync_channel::<TcpStream>(1);
+        let (tx2, rx2) = sync_channel::<TcpStream>(1);
+        let mut senders = vec![Some(tx1), Some(tx2)];
+        let (client1, _server1) = make_stream_pair();
+        let (client2, _server2) = make_stream_pair();
+        senders[0].as_ref().unwrap().try_send(client1).unwrap();
+        senders[1].as_ref().unwrap().try_send(client2).unwrap();
+
+        let (client3, _server3) = make_stream_pair();
+        let (log_tx, log_rx) = sync_channel::<String>(10);
+        let mut next = 0;
+
+        let dispatched = dispatch_connection(&mut senders, client3, &log_tx, &mut next);
+        assert!(!dispatched);
+        assert!(log_rx.try_iter().any(|m| m.contains("unavailable")));
+        drop(rx1);
+        drop(rx2);
+    }
+
+    #[test]
+    fn skips_disconnected_workers() {
+        let (tx1, _rx1) = sync_channel::<TcpStream>(1);
+        let (tx2, rx2) = sync_channel::<TcpStream>(1);
+        let mut senders = vec![Some(tx1), Some(tx2)];
+        // Drop receiver for worker 0 to force Disconnected
+        drop(_rx1);
+
+        let (client, _server) = make_stream_pair();
+        let (log_tx, log_rx) = sync_channel::<String>(10);
+        let mut next = 0;
+
+        let dispatched = dispatch_connection(&mut senders, client, &log_tx, &mut next);
+        assert!(dispatched);
+        assert!(rx2.try_recv().is_ok());
+        assert!(senders[0].is_none());
+        assert!(log_rx.try_iter().any(|m| m.contains("disconnected")));
     }
 }
 
