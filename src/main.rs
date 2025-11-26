@@ -76,12 +76,36 @@ fn parse_request_line(request_line: &str) -> (&str, &str) {
         let method = &request_line[..method_end_index];
         let rest = &request_line[method_end_index + 1..];
         if let Some(path_end_index) = rest.find(' ') {
-            let path = &rest[..path_end_index];
+            let path = rest[..path_end_index]
+                .split_once('?')
+                .map_or(&rest[..path_end_index], |(p, _)| p);
             return (method, path);
         }
-        return (method, rest);
+        let path = rest
+            .split_once('?')
+            .map_or(rest, |(p, _)| p);
+        return (method, path);
     }
     ("", "")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_request_line;
+
+    #[test]
+    fn parses_request_line_without_query() {
+        let (method, path) = parse_request_line("GET / HTTP/1.1");
+        assert_eq!(method, "GET");
+        assert_eq!(path, "/");
+    }
+
+    #[test]
+    fn strips_query_from_path() {
+        let (method, path) = parse_request_line("GET /?foo=bar HTTP/1.1");
+        assert_eq!(method, "GET");
+        assert_eq!(path, "/");
+    }
 }
 
 fn read_headers(stream: &mut TcpStream) -> std::io::Result<String> {
