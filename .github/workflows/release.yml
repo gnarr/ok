@@ -95,6 +95,10 @@ jobs:
           git cliff --output RELEASE.md --unreleased --tag v${{ steps.version_info.outputs.new_version }}
           git cliff --output CHANGELOG.md --tag v${{ steps.version_info.outputs.new_version }}
 
+      - name: Set crate version to new version
+        if: steps.version_info.outputs.release_needed == 'true'
+        run: cargo set-version ${{ steps.version_info.outputs.new_version }}
+
       - name: Stage changelog
         if: steps.version_info.outputs.release_needed == 'true'
         run: git add CHANGELOG.md
@@ -162,6 +166,17 @@ jobs:
             ${{ runner.os }}-cargo-${{ matrix.target }}-
             ${{ runner.os }}-cargo-${{ steps.version_info.outputs.rustc_version }}-
             ${{ runner.os }}-cargo-
+      - name: Install sccache
+        run: |
+          if ! command -v sccache >/dev/null 2>&1; then
+            cargo install sccache --locked
+          fi
+        shell: bash
+      - name: Configure sccache
+        run: |
+          echo "RUSTC_WRAPPER=$(which sccache)" >> $GITHUB_ENV
+          echo "SCCACHE_DIR=$HOME/.cache/sccache" >> $GITHUB_ENV
+        shell: bash
       - name: Install cross
         if: matrix.use_cross
         run: cargo install cross --locked
