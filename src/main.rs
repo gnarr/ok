@@ -568,21 +568,29 @@ fn main() -> std::io::Result<()> {
     }
 
     let mut next = 0;
-    for incoming in listener.incoming() {
-        if let Ok(stream) = incoming {
+    for stream in listener.incoming().flatten() {
+        let stream_slot = Some(stream);
+        let mut sent = false;
+        for _ in 0..pool_size {
             let tx = &senders[next];
             next = (next + 1) % pool_size;
 
-            match tx.try_send(stream) {
-                Ok(_) => {}
-                Err(TrySendError::Full(_)) => {
-                    let _ = log_tx.try_send("Connection dropped: worker queue is full".into());
+            let to_send = match stream_slot {
+                Some(ref s) => s.try_clone().unwrap_or_else(|_| s.try_clone().unwrap()),
+                None => break,
+            };
+
+            match tx.try_send(to_send) {
+                Ok(_) => {
+                    sent = true;
+                    break;
                 }
-                Err(TrySendError::Disconnected(_)) => {
-                    let _ =
-                        log_tx.try_send("Worker queue disconnected – dropping connection".into());
-                }
+                Err(TrySendError::Full(_)) => continue,
+                Err(TrySendError::Disconnected(_)) => continue,
             }
+        }
+        if !sent {
+            let _ = log_tx.try_send("Connection dropped: all worker queues full".into());
         }
     }
     Ok(())
