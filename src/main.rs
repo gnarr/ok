@@ -471,7 +471,6 @@ fn handle_connection(mut stream: TcpStream, log_tx: SyncSender<String>, show_fav
         }
     }
 
-    let body_deadline = Instant::now() + body_timeout_duration();
     let (method, path) = parse_request_line(request_line);
 
     match (method, path) {
@@ -495,6 +494,7 @@ fn handle_connection(mut stream: TcpStream, log_tx: SyncSender<String>, show_fav
         }
         _ => {
             if content_length > 0 {
+                let body_deadline = Instant::now() + body_timeout_duration();
                 if let Err(e) = read_body(&mut stream, content_length, body_deadline) {
                     match e.kind() {
                         std::io::ErrorKind::InvalidData => {
