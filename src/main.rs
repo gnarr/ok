@@ -553,7 +553,7 @@ fn main() -> std::io::Result<()> {
     let mut senders: Vec<Option<SyncSender<TcpStream>>> = Vec::with_capacity(pool_size);
     for _ in 0..pool_size {
         let (tx, rx) = sync_channel::<TcpStream>(QUEUE_CAPACITY);
-        senders.push(Some(tx.clone()));
+        senders.push(Some(tx));
         let log_tx_clone = log_tx.clone();
         let show_favicon = show_favicon;
         thread::spawn(move || {
@@ -577,11 +577,8 @@ fn main() -> std::io::Result<()> {
             }
         };
         let mut dispatched = false;
-        let mut attempts = 0;
-        while attempts < senders.len() {
-            let idx = next;
-            next = (next + 1) % senders.len();
-            attempts += 1;
+        for i in 0..senders.len() {
+            let idx = (next + i) % senders.len();
 
             let Some(tx) = senders[idx].as_ref() else {
                 continue;
@@ -604,6 +601,7 @@ fn main() -> std::io::Result<()> {
                 }
             }
         }
+        next = (next + 1) % senders.len();
         if !dispatched {
             let _ = log_tx
                 .try_send("Connection dropped: all workers unavailable or queues full".into());
