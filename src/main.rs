@@ -368,7 +368,7 @@ fn read_body(
     while remaining > 0 {
         // The socket read timeout bounds a single blocking read; this deadline enforces a
         // total time budget across the full body.
-        if Instant::now() > deadline {
+        if Instant::now() >= deadline {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
                 "Body read timeout",
