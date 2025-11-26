@@ -550,10 +550,10 @@ fn main() -> std::io::Result<()> {
         }
     });
 
-    let mut senders = Vec::with_capacity(pool_size);
+    let mut senders: Vec<Option<SyncSender<TcpStream>>> = Vec::with_capacity(pool_size);
     for _ in 0..pool_size {
         let (tx, rx) = sync_channel::<TcpStream>(QUEUE_CAPACITY);
-        senders.push(tx.clone());
+        senders.push(Some(tx.clone()));
         let log_tx_clone = log_tx.clone();
         let show_favicon = show_favicon;
         thread::spawn(move || {
@@ -568,16 +568,31 @@ fn main() -> std::io::Result<()> {
     }
 
     let mut next = 0;
-    for stream in listener.incoming().flatten() {
-        let stream_slot = Some(stream);
+    for incoming in listener.incoming() {
+        let stream = match incoming {
+            Ok(s) => s,
+            Err(e) => {
+                let _ = log_tx.try_send(format!("Accept error: {}", e));
+                continue;
+            }
+        };
         let mut sent = false;
-        for _ in 0..pool_size {
-            let tx = &senders[next];
-            next = (next + 1) % pool_size;
+        let mut attempts = 0;
+        while attempts < senders.len() {
+            let idx = next;
+            next = (next + 1) % senders.len();
+            attempts += 1;
 
-            let to_send = match stream_slot {
-                Some(ref s) => s.try_clone().unwrap_or_else(|_| s.try_clone().unwrap()),
-                None => break,
+            let Some(tx) = senders[idx].as_ref() else {
+                continue;
+            };
+
+            let to_send = match stream.try_clone() {
+                Ok(clone) => clone,
+                Err(e) => {
+                    let _ = log_tx.try_send(format!("Failed to clone stream: {}", e));
+                    break;
+                }
             };
 
             match tx.try_send(to_send) {
@@ -586,7 +601,11 @@ fn main() -> std::io::Result<()> {
                     break;
                 }
                 Err(TrySendError::Full(_)) => continue,
-                Err(TrySendError::Disconnected(_)) => continue,
+                Err(TrySendError::Disconnected(_)) => {
+                    let _ = log_tx.try_send(format!("Worker {} disconnected", idx));
+                    senders[idx] = None;
+                    continue;
+                }
             }
         }
         if !sent {
