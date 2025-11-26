@@ -74,14 +74,181 @@ fn sanitize(input: &str) -> String {
 fn parse_request_line(request_line: &str) -> (&str, &str) {
     if let Some(method_end_index) = request_line.find(' ') {
         let method = &request_line[..method_end_index];
-        let rest = &request_line[method_end_index + 1..];
+        let rest = request_line[method_end_index + 1..].trim_start();
         if let Some(path_end_index) = rest.find(' ') {
-            let path = &rest[..path_end_index];
+            let path = rest[..path_end_index]
+                .split_once('?')
+                .map_or(&rest[..path_end_index], |(p, _)| p);
             return (method, path);
         }
-        return (method, rest);
+        let path = rest
+            .split_once('?')
+            .map_or(rest, |(p, _)| p);
+        return (method, path);
     }
     ("", "")
+}
+
+fn compute_pool_size(env_value: Option<String>, available_parallelism: Option<usize>) -> usize {
+    env_value
+        .and_then(|v| v.parse::<usize>().ok())
+        .map(|n| if n == 0 { 1 } else { n })
+        .or_else(|| available_parallelism.filter(|n| *n > 0))
+        .unwrap_or(4)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{compute_pool_size, handle_connection, parse_request_line, MAX_BODY_SIZE};
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::mpsc::sync_channel;
+    use std::thread;
+
+    #[test]
+    fn parses_request_line_without_query() {
+        let (method, path) = parse_request_line("GET / HTTP/1.1");
+        assert_eq!(method, "GET");
+        assert_eq!(path, "/");
+    }
+
+    #[test]
+    fn strips_query_from_path() {
+        let (method, path) = parse_request_line("GET /?foo=bar HTTP/1.1");
+        assert_eq!(method, "GET");
+        assert_eq!(path, "/");
+    }
+
+    #[test]
+    fn handles_root_without_http_version() {
+        let (method, path) = parse_request_line("GET /");
+        assert_eq!(method, "GET");
+        assert_eq!(path, "/");
+    }
+
+    #[test]
+    fn handles_missing_http_version() {
+        let (method, path) = parse_request_line("GET /foo");
+        assert_eq!(method, "GET");
+        assert_eq!(path, "/foo");
+    }
+
+    #[test]
+    fn strips_query_with_http_version_and_path() {
+        let (method, path) = parse_request_line("GET /foo?bar=baz HTTP/1.1");
+        assert_eq!(method, "GET");
+        assert_eq!(path, "/foo");
+    }
+
+    #[test]
+    fn strips_multiple_query_params() {
+        let (method, path) = parse_request_line("GET /?foo=bar&baz=qux HTTP/1.1");
+        assert_eq!(method, "GET");
+        assert_eq!(path, "/");
+    }
+
+    #[test]
+    fn handles_empty_query_string() {
+        let (method, path) = parse_request_line("GET /? HTTP/1.1");
+        assert_eq!(method, "GET");
+        assert_eq!(path, "/");
+    }
+
+    #[test]
+    fn preserves_fragment_in_path() {
+        let (method, path) = parse_request_line("GET /#section HTTP/1.1");
+        assert_eq!(method, "GET");
+        assert_eq!(path, "/#section");
+    }
+
+    #[test]
+    fn handles_empty_request_line() {
+        let (method, path) = parse_request_line("");
+        assert_eq!(method, "");
+        assert_eq!(path, "");
+    }
+
+    #[test]
+    fn tolerates_extra_spaces_after_method() {
+        let (method, path) = parse_request_line("GET  /foo HTTP/1.1");
+        assert_eq!(method, "GET");
+        assert_eq!(path, "/foo");
+    }
+
+    #[test]
+    fn pool_size_clamps_zero_to_one() {
+        assert_eq!(compute_pool_size(Some("0".into()), Some(8)), 1);
+    }
+
+    #[test]
+    fn pool_size_uses_env_when_valid() {
+        assert_eq!(compute_pool_size(Some("5".into()), Some(8)), 5);
+    }
+
+    #[test]
+    fn pool_size_falls_back_to_available_parallelism() {
+        assert_eq!(compute_pool_size(None, Some(6)), 6);
+    }
+
+    #[test]
+    fn pool_size_uses_default_when_unset_and_unavailable() {
+        assert_eq!(compute_pool_size(None, None), 4);
+    }
+
+    #[test]
+    fn pool_size_uses_default_when_env_invalid_and_unavailable() {
+        assert_eq!(compute_pool_size(Some("abc".into()), None), 4);
+    }
+
+    fn run_request(raw: &str) -> Vec<u8> {
+        use std::net::Shutdown;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test listener");
+        let addr = listener.local_addr().unwrap();
+        let (log_tx, _log_rx) = sync_channel::<String>(1);
+        let server = thread::spawn(move || {
+            if let Ok((stream, _)) = listener.accept() {
+                handle_connection(stream, log_tx, false);
+            }
+        });
+
+        let mut client = TcpStream::connect(addr).expect("connect to test listener");
+        client
+            .write_all(raw.as_bytes())
+            .expect("write request to server");
+        let _ = client.shutdown(Shutdown::Write);
+        let mut buf = Vec::new();
+        client.read_to_end(&mut buf).expect("read response");
+        let _ = server.join();
+        buf
+    }
+
+    #[test]
+    fn rejects_oversized_content_length_with_413() {
+        let request = format!(
+            "GET / HTTP/1.1\r\nHost: example\r\nContent-Length: {}\r\n\r\n",
+            MAX_BODY_SIZE + 1
+        );
+        let response_bytes = run_request(&request);
+        let response = String::from_utf8_lossy(&response_bytes);
+        assert!(
+            response.starts_with("HTTP/1.1 413"),
+            "unexpected response: {}",
+            response
+        );
+    }
+
+    #[test]
+    fn accepts_valid_content_length() {
+        let request = "GET / HTTP/1.1\r\nHost: example\r\nContent-Length: 5\r\n\r\nhello";
+        let response_bytes = run_request(request);
+        let response = String::from_utf8_lossy(&response_bytes);
+        assert!(
+            response.starts_with("HTTP/1.1 200"),
+            "unexpected response: {}",
+            response
+        );
+    }
 }
 
 fn read_headers(stream: &mut TcpStream) -> std::io::Result<String> {
@@ -202,7 +369,13 @@ fn handle_connection(mut stream: TcpStream, log_tx: SyncSender<String>, show_fav
                 return;
             }
             match val.trim().parse::<usize>() {
-                Ok(len) => content_length = len,
+                Ok(len) => {
+                    if len > MAX_BODY_SIZE {
+                        let _ = stream.write_all(RESPONSE_413);
+                        return;
+                    }
+                    content_length = len;
+                }
                 Err(_) => {
                     let _ = stream.write_all(RESPONSE_431);
                     return;
@@ -213,7 +386,7 @@ fn handle_connection(mut stream: TcpStream, log_tx: SyncSender<String>, show_fav
 
     let peer = get_client_address(&mut stream, &headers);
     let request_line = headers.lines().next().unwrap_or("");
-    let byte_count = headers.len() + content_length;
+    let byte_count = headers.len().saturating_add(content_length);
     let log_message = format!(
         "{} \"{}\" {} bytes",
         peer,
@@ -277,14 +450,10 @@ fn main() -> std::io::Result<()> {
     let show_favicon = env::var("SHOW_FAVICON")
         .map(|v| !v.eq_ignore_ascii_case("false"))
         .unwrap_or(true);
-    let pool_size = env::var("THREAD_POOL_SIZE")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or_else(|| {
-            thread::available_parallelism()
-                .map(|n| n.get())
-                .unwrap_or(4)
-        });
+    let pool_size = compute_pool_size(
+        env::var("THREAD_POOL_SIZE").ok(),
+        thread::available_parallelism().map(|n| n.get()).ok(),
+    );
 
     let listener = TcpListener::bind(&bind_addr)?;
     println!(
