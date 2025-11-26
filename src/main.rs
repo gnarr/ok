@@ -587,7 +587,15 @@ fn main() -> std::io::Result<()> {
                 continue;
             };
 
-            match tx.try_send(stream.try_clone().unwrap_or_else(|_| stream.try_clone().unwrap())) {
+            let to_send = match stream.try_clone() {
+                Ok(clone) => clone,
+                Err(e) => {
+                    let _ = log_tx.try_send(format!("Failed to clone stream: {}", e));
+                    break;
+                }
+            };
+
+            match tx.try_send(to_send) {
                 Ok(_) => {
                     sent = true;
                     break;
