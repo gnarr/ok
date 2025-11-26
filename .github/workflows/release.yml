@@ -18,6 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       new_version: ${{ steps.next_version.outputs.new_version }}
+      release_performed: ${{ steps.tag_check.outputs.exists != 'true' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -62,19 +63,33 @@ jobs:
           new_version=$(git cliff --bumped-version | sed 's/^v//')
           echo "new_version=$new_version" >> $GITHUB_OUTPUT
 
+      - name: Check if tag already exists
+        id: tag_check
+        run: |
+          if git rev-parse -q --verify "refs/tags/v${{ steps.next_version.outputs.new_version }}"; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Tag v${{ steps.next_version.outputs.new_version }} already exists; skipping release steps."
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Generate changelog
+        if: steps.tag_check.outputs.exists != 'true'
         run: |
           git cliff --output RELEASE.md --unreleased --tag v${{ steps.next_version.outputs.new_version }}
           git cliff --output CHANGELOG.md --tag v${{ steps.next_version.outputs.new_version }}
 
       - name: Stage changelog
+        if: steps.tag_check.outputs.exists != 'true'
         run: git add CHANGELOG.md
 
       - name: Commit changelog
+        if: steps.tag_check.outputs.exists != 'true'
         run: |
           git commit -m "chore: update changelog for v${{ steps.next_version.outputs.new_version }}" || echo "No changes to commit"
 
       - name: Run cargo release
+        if: steps.tag_check.outputs.exists != 'true'
         run: |
           cargo release ${{ steps.next_version.outputs.new_version }} \
             --no-publish \
@@ -82,9 +97,11 @@ jobs:
             --execute
 
       - name: Push changes
+        if: steps.tag_check.outputs.exists != 'true'
         run: git push --follow-tags origin main
 
       - name: Create GitHub Release
+        if: steps.tag_check.outputs.exists != 'true'
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.next_version.outputs.new_version }}
@@ -94,6 +111,7 @@ jobs:
 
   linux-amd64:
     needs: release
+    if: needs.release.outputs.release_performed == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -119,6 +137,7 @@ jobs:
 
   linux-arm64:
     needs: release
+    if: needs.release.outputs.release_performed == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -145,6 +164,7 @@ jobs:
 
   linux-armv7:
     needs: release
+    if: needs.release.outputs.release_performed == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -171,6 +191,7 @@ jobs:
 
   windows-amd64:
     needs: release
+    if: needs.release.outputs.release_performed == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
