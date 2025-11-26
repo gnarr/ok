@@ -17,8 +17,8 @@ jobs:
   release:
     runs-on: ubuntu-latest
     outputs:
-      new_version: ${{ steps.next_version.outputs.new_version }}
-      release_performed: ${{ steps.tag_check.outputs.exists != 'true' }}
+      new_version: ${{ steps.version_info.outputs.new_version }}
+      release_needed: ${{ steps.version_info.outputs.release_needed }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -57,141 +57,135 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Determine next version
-        id: next_version
+        id: version_info
         shell: bash
         run: |
-          new_version=$(git cliff --bumped-version | sed 's/^v//')
-          echo "new_version=$new_version" >> $GITHUB_OUTPUT
-
-      - name: Check if tag already exists
-        id: tag_check
-        run: |
-          if git rev-parse -q --verify "refs/tags/v${{ steps.next_version.outputs.new_version }}"; then
-            echo "exists=true" >> $GITHUB_OUTPUT
-            echo "Tag v${{ steps.next_version.outputs.new_version }} already exists; skipping release steps."
-          else
-            echo "exists=false" >> $GITHUB_OUTPUT
+          set -eo pipefail
+          current_version=$(grep '^version\s*=' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          commits_since_tag=0
+          if [ -n "$latest_tag" ]; then
+            commits_since_tag=$(git rev-list --count "${latest_tag}..HEAD")
           fi
+          bump_patch() {
+            IFS='.' read -r major minor patch <<<"$1"
+            echo "${major}.${minor}.$((patch+1))"
+          }
+          candidate="$current_version"
+          if [ "$latest_tag" = "v$current_version" ]; then
+            candidate=$(bump_patch "$candidate")
+          fi
+          while git rev-parse -q --verify "refs/tags/v${candidate}" >/dev/null; do
+            candidate=$(bump_patch "$candidate")
+          done
+          release_needed=true
+          if [ "$latest_tag" = "v$current_version" ] && [ "$commits_since_tag" -eq 0 ]; then
+            release_needed=false
+          fi
+          echo "current_version=$current_version"
+          echo "latest_tag=$latest_tag"
+          echo "new_version=$candidate" >> $GITHUB_OUTPUT
+          echo "release_needed=$release_needed" >> $GITHUB_OUTPUT
 
       - name: Generate changelog
-        if: steps.tag_check.outputs.exists != 'true'
+        if: steps.version_info.outputs.release_needed == 'true'
         run: |
-          git cliff --output RELEASE.md --unreleased --tag v${{ steps.next_version.outputs.new_version }}
-          git cliff --output CHANGELOG.md --tag v${{ steps.next_version.outputs.new_version }}
+          git cliff --output RELEASE.md --unreleased --tag v${{ steps.version_info.outputs.new_version }}
+          git cliff --output CHANGELOG.md --tag v${{ steps.version_info.outputs.new_version }}
 
       - name: Stage changelog
-        if: steps.tag_check.outputs.exists != 'true'
+        if: steps.version_info.outputs.release_needed == 'true'
         run: git add CHANGELOG.md
 
       - name: Commit changelog
-        if: steps.tag_check.outputs.exists != 'true'
+        if: steps.version_info.outputs.release_needed == 'true'
         run: |
-          git commit -m "chore: update changelog for v${{ steps.next_version.outputs.new_version }}" || echo "No changes to commit"
+          git commit -m "chore: update changelog for v${{ steps.version_info.outputs.new_version }}" || echo "No changes to commit"
 
       - name: Run cargo release
-        if: steps.tag_check.outputs.exists != 'true'
+        if: steps.version_info.outputs.release_needed == 'true'
         run: |
-          cargo release ${{ steps.next_version.outputs.new_version }} \
+          cargo release ${{ steps.version_info.outputs.new_version }} \
             --no-publish \
             --no-confirm \
             --execute
 
       - name: Push changes
-        if: steps.tag_check.outputs.exists != 'true'
+        if: steps.version_info.outputs.release_needed == 'true'
         run: git push --follow-tags origin main
 
       - name: Create GitHub Release
-        if: steps.tag_check.outputs.exists != 'true'
+        if: steps.version_info.outputs.release_needed == 'true'
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: v${{ steps.next_version.outputs.new_version }}
+          tag_name: v${{ steps.version_info.outputs.new_version }}
           body_path: RELEASE.md
-          name: Release v${{ steps.next_version.outputs.new_version }}
+          name: Release v${{ steps.version_info.outputs.new_version }}
           token: ${{ secrets.RELEASE_PAT }}
 
-  linux-amd64:
+  linux-build:
     needs: release
-    if: needs.release.outputs.release_performed == 'true'
+    if: needs.release.outputs.release_needed == 'true'
     runs-on: ubuntu-latest
+    strategy:
+        fail-fast: false
+        matrix:
+          include:
+            - target: x86_64-unknown-linux-gnu
+              artifact_suffix: linux-amd64
+              use_cross: false
+            - target: aarch64-unknown-linux-gnu
+              artifact_suffix: linux-arm64
+              use_cross: true
+            - target: armv7-unknown-linux-gnueabihf
+              artifact_suffix: linux-armv7
+              use_cross: true
     steps:
       - uses: actions/checkout@v4
         with:
           ref: v${{ needs.release.outputs.new_version }}
-          fetch-depth: 0
-      - run: cargo build --release
-      - name: Extract name
-        id: pkg
-        run: |
-          echo "project_name=$(grep '^name =' Cargo.toml | cut -d '"' -f2)" >> $GITHUB_OUTPUT
-      - run: |
-          mkdir -p release
-          cp target/release/${{ steps.pkg.outputs.project_name }} release/${{ steps.pkg.outputs.project_name }}-linux-amd64
-      - uses: actions/upload-artifact@v4
-        with: { name: linux-amd64, path: release/*, retention-days: 1 }
-      - name: Upload Binary Artifact to GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release upload "v${{ needs.release.outputs.new_version }}" "release/${{ steps.pkg.outputs.project_name }}-linux-amd64" --clobber
-    outputs:
-      project_name: ${{ steps.pkg.outputs.project_name }}
-
-  linux-arm64:
-    needs: release
-    if: needs.release.outputs.release_performed == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
+          fetch-depth: 1
+      - name: Cargo cache
+        uses: actions/cache@v4
         with:
-          ref: v${{ needs.release.outputs.new_version }}
-          fetch-depth: 0
-      - run: cargo install cross --locked
-      - run: cross build --release --target aarch64-unknown-linux-gnu
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ matrix.target }}-
+            ${{ runner.os }}-cargo-
+      - name: Install cross
+        if: matrix.use_cross
+        run: cargo install cross --locked
+      - name: Build
+        run: |
+          if [ "${{ matrix.use_cross }}" = "true" ]; then
+            cross build --release --target ${{ matrix.target }}
+          else
+            cargo build --release --target ${{ matrix.target }}
+          fi
       - name: Extract name
         id: pkg
         run: |
-          echo "project_name=$(grep '^name =' Cargo.toml | cut -d '"' -f2)" >> $GITHUB_OUTPUT
-      - run: |
-          mkdir -p release
-          cp target/aarch64-unknown-linux-gnu/release/${{ steps.pkg.outputs.project_name }} release/${{ steps.pkg.outputs.project_name }}-linux-arm64
-      - uses: actions/upload-artifact@v4
-        with: { name: linux-arm64, path: release/*, retention-days: 1 }
-      - name: Upload Binary Artifact to GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release upload "v${{ needs.release.outputs.new_version }}" "release/${{ steps.pkg.outputs.project_name }}-linux-arm64" --clobber
-    outputs:
-      project_name: ${{ steps.pkg.outputs.project_name }}
-
-  linux-armv7:
-    needs: release
-    if: needs.release.outputs.release_performed == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: v${{ needs.release.outputs.new_version }}
-          fetch-depth: 0
-      - run: cargo install cross --locked
-      - run: cross build --release --target armv7-unknown-linux-gnueabihf
-      - name: Extract name
-        id: pkg
+          echo "project_name=$(grep '^name =' Cargo.toml | cut -d '\"' -f2)" >> $GITHUB_OUTPUT
+      - name: Prepare artifact
         run: |
-          echo "project_name=$(grep '^name =' Cargo.toml | cut -d '"' -f2)" >> $GITHUB_OUTPUT
-      - run: |
           mkdir -p release
-          cp target/armv7-unknown-linux-gnueabihf/release/${{ steps.pkg.outputs.project_name }} release/${{ steps.pkg.outputs.project_name }}-linux-armv7
+          cp target/${{ matrix.target }}/release/${{ steps.pkg.outputs.project_name }} release/${{ steps.pkg.outputs.project_name }}-${{ matrix.artifact_suffix }}
       - uses: actions/upload-artifact@v4
-        with: { name: linux-armv7, path: release/*, retention-days: 1 }
+        with: { name: ${{ matrix.artifact_suffix }}, path: release/*, retention-days: 1 }
       - name: Upload Binary Artifact to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "v${{ needs.release.outputs.new_version }}" "release/${{ steps.pkg.outputs.project_name }}-linux-armv7" --clobber
-    outputs:
-      project_name: ${{ steps.pkg.outputs.project_name }}
+        run: gh release upload "v${{ needs.release.outputs.new_version }}" "release/${{ steps.pkg.outputs.project_name }}-${{ matrix.artifact_suffix }}" --clobber
 
   windows-amd64:
     needs: release
-    if: needs.release.outputs.release_performed == 'true'
+    if: needs.release.outputs.release_needed == 'true'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
