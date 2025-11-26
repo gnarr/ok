@@ -113,6 +113,10 @@ fn dispatch_connection(
     log_tx: &SyncSender<String>,
     next: &mut usize,
 ) -> bool {
+    if senders.is_empty() {
+        let _ = log_tx.try_send("Connection dropped: no workers available".into());
+        return false;
+    }
     let mut dispatched = false;
     for i in 0..senders.len() {
         let idx = (*next + i) % senders.len();
