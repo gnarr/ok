@@ -576,7 +576,7 @@ fn main() -> std::io::Result<()> {
                 continue;
             }
         };
-        let mut sent = false;
+        let mut dispatched = false;
         let mut attempts = 0;
         while attempts < senders.len() {
             let idx = next;
@@ -589,7 +589,7 @@ fn main() -> std::io::Result<()> {
 
             match tx.try_send(stream) {
                 Ok(_) => {
-                    sent = true;
+                    dispatched = true;
                     break;
                 }
                 Err(TrySendError::Full(returned)) => {
@@ -604,7 +604,7 @@ fn main() -> std::io::Result<()> {
                 }
             }
         }
-        if !sent {
+        if !dispatched {
             let _ = log_tx.try_send("Connection dropped: all worker queues full".into());
         }
     }
