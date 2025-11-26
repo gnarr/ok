@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.2] - 2025-11-26
+
+### 🐛 Bug Fixes
+
+- *(ci)* Use Rust 2021 edition for release builds
+
+### ⚙️ Miscellaneous Tasks
+
+- *(ci)* Let cargo release handle version bump and lockfile updates
+
 ## [0.4.1] - 2025-11-26
 
 ### 🚀 Features
@@ -20,6 +30,7 @@ All notable changes to this project will be documented in this file.
 - Fix docker job dependencies after matrix change
 - Ensure cargo-edit is installed for set-version
 - Fix workflow ordering for cargo-edit install
+- Update changelog for v0.4.1
 
 ## [0.3.2] - 2025-04-28
 
