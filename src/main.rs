@@ -605,7 +605,8 @@ fn main() -> std::io::Result<()> {
             }
         }
         if !dispatched {
-            let _ = log_tx.try_send("Connection dropped: all worker queues full".into());
+            let _ = log_tx
+                .try_send("Connection dropped: all workers unavailable or queues full".into());
         }
     }
     Ok(())
