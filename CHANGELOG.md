@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.3] - 2025-11-26
+
+### ⚙️ Miscellaneous Tasks
+
+- *(ci)* Simplify artifact name extraction with grep
+
 ## [0.4.2] - 2025-11-26
 
 ### 🐛 Bug Fixes
@@ -11,6 +17,8 @@ All notable changes to this project will be documented in this file.
 ### ⚙️ Miscellaneous Tasks
 
 - *(ci)* Let cargo release handle version bump and lockfile updates
+- Update changelog for v0.4.2
+- Release ok version 0.4.2
 
 ## [0.4.1] - 2025-11-26
 
