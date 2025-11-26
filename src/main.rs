@@ -577,7 +577,6 @@ fn main() -> std::io::Result<()> {
             }
         };
         let mut sent = false;
-        let mut stream_slot = Some(stream);
         let mut attempts = 0;
         while attempts < senders.len() {
             let idx = next;
@@ -588,21 +587,13 @@ fn main() -> std::io::Result<()> {
                 continue;
             };
 
-            let Some(to_send) = stream_slot.take() else {
-                break;
-            };
-
-            match tx.try_send(to_send) {
+            match tx.try_send(stream.try_clone().unwrap_or_else(|_| stream.try_clone().unwrap())) {
                 Ok(_) => {
                     sent = true;
                     break;
                 }
-                Err(TrySendError::Full(returned)) => {
-                    stream_slot = Some(returned);
-                    continue;
-                }
-                Err(TrySendError::Disconnected(returned)) => {
-                    stream_slot = Some(returned);
+                Err(TrySendError::Full(_)) => continue,
+                Err(TrySendError::Disconnected(_)) => {
                     let _ = log_tx.try_send(format!("Worker {} disconnected", idx));
                     senders[idx] = None;
                     continue;
