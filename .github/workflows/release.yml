@@ -194,7 +194,8 @@ jobs:
       - name: Extract name
         id: pkg
         run: |
-          echo "project_name=$(grep '^name =' Cargo.toml | cut -d '\"' -f2)" >> $GITHUB_OUTPUT
+          project_name=$(grep '^name\\s*=' Cargo.toml | head -1 | cut -d '\"' -f2)
+          echo "project_name=${project_name}" >> "$GITHUB_OUTPUT"
       - name: Prepare artifact
         run: |
           mkdir -p release
@@ -268,7 +269,8 @@ jobs:
       - name: Extract name
         id: pkg
         run: |
-          echo "project_name=$(grep '^name =' Cargo.toml | cut -d '"' -f2)" >> $GITHUB_OUTPUT
+          project_name=$(grep '^name\\s*=' Cargo.toml | head -1 | cut -d '\"' -f2)
+          echo "project_name=${project_name}" >> "$GITHUB_OUTPUT"
       - run: |
           mkdir -p release
           cp target/aarch64-apple-darwin/release/${{ steps.pkg.outputs.project_name }} release/${{ steps.pkg.outputs.project_name }}-darwin-arm64
