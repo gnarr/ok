@@ -382,17 +382,17 @@ mod tests {
     }
 
     #[test]
-    fn advances_round_robin_counter() {
-        let (tx, rx) = sync_channel::<TcpStream>(1);
-        let mut senders = vec![Some(tx)];
+    fn advances_round_robin_counter_with_multiple_workers() {
+        let (tx1, _rx1) = sync_channel::<TcpStream>(1);
+        let (tx2, rx2) = sync_channel::<TcpStream>(1);
+        let mut senders = vec![Some(tx1), Some(tx2)];
         let (client, _server) = make_stream_pair();
         let (log_tx, _log_rx) = sync_channel::<String>(10);
         let mut next = 0;
         let dispatched = dispatch_connection(&mut senders, client, &log_tx, &mut next);
         assert!(dispatched);
-        assert_eq!(next, 0);
-        // drain to avoid unused warnings
-        let _ = rx.try_recv();
+        assert_eq!(next, 1);
+        let _ = rx2.try_recv();
     }
 
     #[test]
