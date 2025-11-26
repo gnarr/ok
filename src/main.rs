@@ -366,6 +366,8 @@ fn read_body(
     }
     let mut buf = [0u8; 4096];
     while remaining > 0 {
+        // The socket read timeout bounds a single blocking read; this deadline enforces a
+        // total time budget across the full body.
         if Instant::now() > deadline {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
