@@ -569,7 +569,7 @@ fn main() -> std::io::Result<()> {
 
     let mut next = 0;
     for incoming in listener.incoming() {
-        let stream = match incoming {
+        let mut stream = match incoming {
             Ok(s) => s,
             Err(e) => {
                 let _ = log_tx.try_send(format!("Accept error: {}", e));
@@ -587,22 +587,20 @@ fn main() -> std::io::Result<()> {
                 continue;
             };
 
-            match stream.try_clone() {
-                Ok(clone) => match tx.try_send(clone) {
-                    Ok(_) => {
-                        sent = true;
-                        break;
-                    }
-                    Err(TrySendError::Full(_)) => continue,
-                    Err(TrySendError::Disconnected(_)) => {
-                        let _ = log_tx.try_send(format!("Worker {} disconnected", idx));
-                        senders[idx] = None;
-                        continue;
-                    }
-                },
-                Err(e) => {
-                    let _ = log_tx.try_send(format!("Failed to clone stream: {}", e));
+            match tx.try_send(stream) {
+                Ok(_) => {
+                    sent = true;
                     break;
+                }
+                Err(TrySendError::Full(returned)) => {
+                    stream = returned;
+                    continue;
+                }
+                Err(TrySendError::Disconnected(returned)) => {
+                    stream = returned;
+                    let _ = log_tx.try_send(format!("Worker {} disconnected", idx));
+                    senders[idx] = None;
+                    continue;
                 }
             }
         }
