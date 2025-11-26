@@ -89,9 +89,17 @@ fn parse_request_line(request_line: &str) -> (&str, &str) {
     ("", "")
 }
 
+fn compute_pool_size(env_value: Option<String>, available_parallelism: Option<usize>) -> usize {
+    env_value
+        .and_then(|v| v.parse::<usize>().ok())
+        .map(|n| if n == 0 { 1 } else { n })
+        .or_else(|| available_parallelism.filter(|n| *n > 0))
+        .unwrap_or(4)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{handle_connection, parse_request_line, MAX_BODY_SIZE};
+    use super::{compute_pool_size, handle_connection, parse_request_line, MAX_BODY_SIZE};
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
     use std::sync::mpsc::sync_channel;
@@ -165,6 +173,31 @@ mod tests {
         let (method, path) = parse_request_line("GET  /foo HTTP/1.1");
         assert_eq!(method, "GET");
         assert_eq!(path, "/foo");
+    }
+
+    #[test]
+    fn pool_size_clamps_zero_to_one() {
+        assert_eq!(compute_pool_size(Some("0".into()), Some(8)), 1);
+    }
+
+    #[test]
+    fn pool_size_uses_env_when_valid() {
+        assert_eq!(compute_pool_size(Some("5".into()), Some(8)), 5);
+    }
+
+    #[test]
+    fn pool_size_falls_back_to_available_parallelism() {
+        assert_eq!(compute_pool_size(None, Some(6)), 6);
+    }
+
+    #[test]
+    fn pool_size_uses_default_when_unset_and_unavailable() {
+        assert_eq!(compute_pool_size(None, None), 4);
+    }
+
+    #[test]
+    fn pool_size_uses_default_when_env_invalid_and_unavailable() {
+        assert_eq!(compute_pool_size(Some("abc".into()), None), 4);
     }
 
     fn run_request(raw: &str) -> Vec<u8> {
@@ -417,15 +450,10 @@ fn main() -> std::io::Result<()> {
     let show_favicon = env::var("SHOW_FAVICON")
         .map(|v| !v.eq_ignore_ascii_case("false"))
         .unwrap_or(true);
-    let pool_size = env::var("THREAD_POOL_SIZE")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .map(|n| if n == 0 { 1 } else { n })
-        .unwrap_or_else(|| {
-            thread::available_parallelism()
-                .map(|n| n.get())
-                .unwrap_or(4)
-        });
+    let pool_size = compute_pool_size(
+        env::var("THREAD_POOL_SIZE").ok(),
+        thread::available_parallelism().map(|n| n.get()).ok(),
+    );
 
     let listener = TcpListener::bind(&bind_addr)?;
     println!(
