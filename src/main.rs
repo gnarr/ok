@@ -108,6 +108,13 @@ mod tests {
     }
 
     #[test]
+    fn handles_root_without_http_version() {
+        let (method, path) = parse_request_line("GET /");
+        assert_eq!(method, "GET");
+        assert_eq!(path, "/");
+    }
+
+    #[test]
     fn handles_missing_http_version() {
         let (method, path) = parse_request_line("GET /foo");
         assert_eq!(method, "GET");
@@ -119,6 +126,34 @@ mod tests {
         let (method, path) = parse_request_line("GET /foo?bar=baz HTTP/1.1");
         assert_eq!(method, "GET");
         assert_eq!(path, "/foo");
+    }
+
+    #[test]
+    fn strips_multiple_query_params() {
+        let (method, path) = parse_request_line("GET /?foo=bar&baz=qux HTTP/1.1");
+        assert_eq!(method, "GET");
+        assert_eq!(path, "/");
+    }
+
+    #[test]
+    fn handles_empty_query_string() {
+        let (method, path) = parse_request_line("GET /? HTTP/1.1");
+        assert_eq!(method, "GET");
+        assert_eq!(path, "/");
+    }
+
+    #[test]
+    fn preserves_fragment_in_path() {
+        let (method, path) = parse_request_line("GET /#section HTTP/1.1");
+        assert_eq!(method, "GET");
+        assert_eq!(path, "/#section");
+    }
+
+    #[test]
+    fn handles_empty_request_line() {
+        let (method, path) = parse_request_line("");
+        assert_eq!(method, "");
+        assert_eq!(path, "");
     }
 
     #[test]
