@@ -280,6 +280,7 @@ fn main() -> std::io::Result<()> {
     let pool_size = env::var("THREAD_POOL_SIZE")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
+        .map(|n| if n == 0 { 1 } else { n })
         .unwrap_or_else(|| {
             thread::available_parallelism()
                 .map(|n| n.get())
