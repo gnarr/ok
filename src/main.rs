@@ -223,13 +223,18 @@ mod tests {
                 .set_read_timeout(Some(Duration::from_millis(100)))
                 .ok();
             let deadline = Instant::now() - Duration::from_millis(1);
-            read_body(&mut stream, 1, deadline)
-                .expect_err("expected read_body to time out")
-                .kind()
+            let err = read_body(&mut stream, 1, deadline)
+                .expect_err("expected read_body to time out");
+            (err.kind(), err.to_string())
         });
         let _client = TcpStream::connect(addr).unwrap();
-        let kind = server.join().unwrap();
+        let (kind, msg) = server.join().unwrap();
         assert_eq!(kind, std::io::ErrorKind::TimedOut);
+        assert!(
+            msg.contains("Body read timeout"),
+            "expected body timeout message, got: {}",
+            msg
+        );
     }
 
     #[test]
