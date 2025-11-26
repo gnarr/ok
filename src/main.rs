@@ -52,6 +52,16 @@ X-Content-Type-Options: nosniff\r\n\
 X-Frame-Options: DENY\r\n\
 Content-Length: 0\r\n\r\n";
 
+#[cfg(test)]
+fn body_timeout_duration() -> Duration {
+    Duration::from_millis(50)
+}
+
+#[cfg(not(test))]
+fn body_timeout_duration() -> Duration {
+    Duration::from_secs(5)
+}
+
 const FAVICON_PNG: &[u8] = &[
     0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
     0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x10, 0x08, 0x03, 0x00, 0x00, 0x00, 0x28, 0x2D, 0x0F,
@@ -99,11 +109,14 @@ fn compute_pool_size(env_value: Option<String>, available_parallelism: Option<us
 
 #[cfg(test)]
 mod tests {
-    use super::{compute_pool_size, handle_connection, parse_request_line, MAX_BODY_SIZE};
+    use super::{
+        compute_pool_size, handle_connection, parse_request_line, read_body, MAX_BODY_SIZE,
+    };
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
     use std::sync::mpsc::sync_channel;
     use std::thread;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn parses_request_line_without_query() {
@@ -200,6 +213,44 @@ mod tests {
         assert_eq!(compute_pool_size(Some("abc".into()), None), 4);
     }
 
+    #[test]
+    fn read_body_times_out_when_deadline_passed() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_millis(100)))
+                .ok();
+            let deadline = Instant::now() - Duration::from_millis(1);
+            let err = read_body(&mut stream, 1, deadline)
+                .expect_err("expected read_body to time out");
+            (err.kind(), err.to_string())
+        });
+        let _client = TcpStream::connect(addr).unwrap();
+        let (kind, msg) = server.join().unwrap();
+        assert_eq!(kind, std::io::ErrorKind::TimedOut);
+        assert!(
+            msg.contains("Body read timeout"),
+            "expected body timeout message, got: {}",
+            msg
+        );
+    }
+
+    #[test]
+    fn read_body_succeeds_before_deadline() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let deadline = Instant::now() + Duration::from_secs(1);
+            read_body(&mut stream, 4, deadline).unwrap();
+        });
+        let mut client = TcpStream::connect(addr).unwrap();
+        client.write_all(b"test").unwrap();
+        server.join().unwrap();
+    }
+
     fn run_request(raw: &str) -> Vec<u8> {
         use std::net::Shutdown;
 
@@ -245,6 +296,18 @@ mod tests {
         let response = String::from_utf8_lossy(&response_bytes);
         assert!(
             response.starts_with("HTTP/1.1 200"),
+            "unexpected response: {}",
+            response
+        );
+    }
+
+    #[test]
+    fn rejects_chunked_requests_with_501() {
+        let request = "GET / HTTP/1.1\r\nHost: example\r\nTransfer-Encoding: chunked\r\n\r\n";
+        let response_bytes = run_request(request);
+        let response = String::from_utf8_lossy(&response_bytes);
+        assert!(
+            response.starts_with("HTTP/1.1 501"),
             "unexpected response: {}",
             response
         );
@@ -295,7 +358,11 @@ fn read_headers(stream: &mut TcpStream) -> std::io::Result<String> {
     Ok(String::from_utf8_lossy(&buffer[..total_read]).to_string())
 }
 
-fn read_body(stream: &mut TcpStream, mut remaining: usize) -> std::io::Result<()> {
+fn read_body(
+    stream: &mut TcpStream,
+    mut remaining: usize,
+    deadline: Instant,
+) -> std::io::Result<()> {
     if remaining > MAX_BODY_SIZE {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
@@ -304,6 +371,14 @@ fn read_body(stream: &mut TcpStream, mut remaining: usize) -> std::io::Result<()
     }
     let mut buf = [0u8; 4096];
     while remaining > 0 {
+        // The socket read timeout bounds a single blocking read; this deadline enforces a
+        // total time budget across the full body.
+        if Instant::now() >= deadline {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "Body read timeout",
+            ));
+        }
         let to_read = std::cmp::min(buf.len(), remaining);
         let n = stream.read(&mut buf[..to_read])?;
         if n == 0 {
@@ -424,9 +499,16 @@ fn handle_connection(mut stream: TcpStream, log_tx: SyncSender<String>, show_fav
         }
         _ => {
             if content_length > 0 {
-                if let Err(e) = read_body(&mut stream, content_length) {
-                    if e.kind() == std::io::ErrorKind::InvalidData {
-                        let _ = stream.write_all(RESPONSE_413);
+                let body_deadline = Instant::now() + body_timeout_duration();
+                if let Err(e) = read_body(&mut stream, content_length, body_deadline) {
+                    match e.kind() {
+                        std::io::ErrorKind::InvalidData => {
+                            let _ = stream.write_all(RESPONSE_413);
+                        }
+                        std::io::ErrorKind::TimedOut => {
+                            let _ = stream.write_all(RESPONSE_408);
+                        }
+                        _ => {}
                     }
                     return;
                 }
