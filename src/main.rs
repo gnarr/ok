@@ -202,7 +202,13 @@ fn handle_connection(mut stream: TcpStream, log_tx: SyncSender<String>, show_fav
                 return;
             }
             match val.trim().parse::<usize>() {
-                Ok(len) => content_length = len,
+                Ok(len) => {
+                    if len > MAX_BODY_SIZE {
+                        let _ = stream.write_all(RESPONSE_413);
+                        return;
+                    }
+                    content_length = len;
+                }
                 Err(_) => {
                     let _ = stream.write_all(RESPONSE_431);
                     return;
@@ -213,7 +219,7 @@ fn handle_connection(mut stream: TcpStream, log_tx: SyncSender<String>, show_fav
 
     let peer = get_client_address(&mut stream, &headers);
     let request_line = headers.lines().next().unwrap_or("");
-    let byte_count = headers.len() + content_length;
+    let byte_count = headers.len().saturating_add(content_length);
     let log_message = format!(
         "{} \"{}\" {} bytes",
         peer,
