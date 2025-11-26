@@ -2,11 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.1] - 2025-11-26
+
+### 🚀 Features
+
+- Add health-check
+- Add body read deadline and validation (#5)
+- Retry across workers before dropping connection (#6)
+
+### ⚙️ Miscellaneous Tasks
+
+- Skip release when tag already exists
+- Speed up release builds with matrix and caches
+- Include rustc in cache key and cache windows build
+- Align crate version, add sccache for release builds
+- Fix release workflow outputs and cache keys
+- Fix docker job dependencies after matrix change
+- Ensure cargo-edit is installed for set-version
+- Fix workflow ordering for cargo-edit install
+
 ## [0.3.2] - 2025-04-28
 
 ### ⚙️ Miscellaneous Tasks
 
 - Update dockerhub-description to version 4
+- Update changelog for v0.3.2
+- Release ok version 0.3.2
 
 ## [0.3.1] - 2025-04-28
 
