@@ -91,7 +91,11 @@ fn parse_request_line(request_line: &str) -> (&str, &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_request_line;
+    use super::{handle_connection, parse_request_line, MAX_BODY_SIZE};
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::mpsc::sync_channel;
+    use std::thread;
 
     #[test]
     fn parses_request_line_without_query() {
@@ -161,6 +165,56 @@ mod tests {
         let (method, path) = parse_request_line("GET  /foo HTTP/1.1");
         assert_eq!(method, "GET");
         assert_eq!(path, "/foo");
+    }
+
+    fn run_request(raw: &str) -> Vec<u8> {
+        use std::net::Shutdown;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test listener");
+        let addr = listener.local_addr().unwrap();
+        let (log_tx, _log_rx) = sync_channel::<String>(1);
+        let server = thread::spawn(move || {
+            if let Ok((stream, _)) = listener.accept() {
+                handle_connection(stream, log_tx, false);
+            }
+        });
+
+        let mut client = TcpStream::connect(addr).expect("connect to test listener");
+        client
+            .write_all(raw.as_bytes())
+            .expect("write request to server");
+        let _ = client.shutdown(Shutdown::Write);
+        let mut buf = Vec::new();
+        client.read_to_end(&mut buf).expect("read response");
+        let _ = server.join();
+        buf
+    }
+
+    #[test]
+    fn rejects_oversized_content_length_with_413() {
+        let request = format!(
+            "GET / HTTP/1.1\r\nHost: example\r\nContent-Length: {}\r\n\r\n",
+            MAX_BODY_SIZE + 1
+        );
+        let response_bytes = run_request(&request);
+        let response = String::from_utf8_lossy(&response_bytes);
+        assert!(
+            response.starts_with("HTTP/1.1 413"),
+            "unexpected response: {}",
+            response
+        );
+    }
+
+    #[test]
+    fn accepts_valid_content_length() {
+        let request = "GET / HTTP/1.1\r\nHost: example\r\nContent-Length: 5\r\n\r\nhello";
+        let response_bytes = run_request(request);
+        let response = String::from_utf8_lossy(&response_bytes);
+        assert!(
+            response.starts_with("HTTP/1.1 200"),
+            "unexpected response: {}",
+            response
+        );
     }
 }
 
