@@ -196,7 +196,7 @@ jobs:
       - name: Extract name
         id: pkg
         run: |
-          project_name=$(grep '^name\\s*=' Cargo.toml | head -1 | cut -d '\"' -f2)
+          project_name=$(sed -n 's/^name[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' Cargo.toml | head -1)
           echo "project_name=${project_name}" >> "$GITHUB_OUTPUT"
       - name: Prepare artifact
         run: |
@@ -275,7 +275,7 @@ jobs:
       - name: Extract name
         id: pkg
         run: |
-          project_name=$(grep '^name\\s*=' Cargo.toml | head -1 | cut -d '\"' -f2)
+          project_name=$(sed -n 's/^name[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' Cargo.toml | head -1)
           echo "project_name=${project_name}" >> "$GITHUB_OUTPUT"
       - run: |
           mkdir -p release
