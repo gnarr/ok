@@ -5,8 +5,7 @@ on:
     branches: [ main ]
 
 permissions:
-  contents: write
-  packages: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -16,13 +15,15 @@ env:
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     outputs:
       new_version: ${{ steps.version_info.outputs.new_version }}
       release_needed: ${{ steps.version_info.outputs.release_needed }}
       rustc_version: ${{ steps.version_info.outputs.rustc_version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           fetch-depth: 0
 
@@ -32,7 +33,7 @@ jobs:
           sed -i '/name = "ok"/{n;/version =/d}' Cargo-sanitized.lock
 
       - name: Cargo cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         id: cache-cargo
         with:
           path: |
@@ -126,17 +127,18 @@ jobs:
 
       - name: Create GitHub Release
         if: steps.version_info.outputs.release_needed == 'true'
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@26994186c0ac3ef5cae75ac16aa32e8153525f77
         with:
           tag_name: v${{ steps.version_info.outputs.new_version }}
           body_path: RELEASE.md
           name: Release v${{ steps.version_info.outputs.new_version }}
-          token: ${{ secrets.RELEASE_PAT }}
 
   linux-build:
     needs: release
     if: needs.release.outputs.release_needed == 'true'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     strategy:
         fail-fast: false
         matrix:
@@ -151,12 +153,12 @@ jobs:
               artifact_suffix: linux-armv7
               use_cross: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: v${{ needs.release.outputs.new_version }}
           fetch-depth: 1
       - name: Cargo cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: |
             ~/.cargo/bin/
@@ -200,7 +202,7 @@ jobs:
         run: |
           mkdir -p release
           cp target/${{ matrix.target }}/release/${{ steps.pkg.outputs.project_name }} release/${{ steps.pkg.outputs.project_name }}-${{ matrix.artifact_suffix }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ${{ matrix.artifact_suffix }}
           path: release/*
@@ -214,13 +216,15 @@ jobs:
     needs: release
     if: needs.release.outputs.release_needed == 'true'
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: v${{ needs.release.outputs.new_version }}
           fetch-depth: 1
       - name: Cargo cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: |
             ~\AppData\Local\cargo\bin\
@@ -247,7 +251,7 @@ jobs:
           mkdir -Force release
           cp "target/release/${{ steps.pkg.outputs.project_name }}.exe" `
               "release/${{ steps.pkg.outputs.project_name }}-windows-amd64.exe"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with: { name: windows-amd64, path: release/*, retention-days: 1 }
       - name: Upload Binary Artifact to GitHub Release
         env:
@@ -259,8 +263,10 @@ jobs:
   apple-arm64:
     needs: release
     runs-on: macos-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: v${{ needs.release.outputs.new_version }}
           fetch-depth: 0
@@ -274,7 +280,7 @@ jobs:
       - run: |
           mkdir -p release
           cp target/aarch64-apple-darwin/release/${{ steps.pkg.outputs.project_name }} release/${{ steps.pkg.outputs.project_name }}-darwin-arm64
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with: { name: darwin-arm64, path: release/*, retention-days: 1 }
       - name: Upload Binary Artifact to GitHub Release
         env:
@@ -286,30 +292,27 @@ jobs:
   docker_image:
     needs: [release, linux-build]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
         with:
           ref: v${{ needs.release.outputs.new_version }}
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with: { path: binaries, pattern: 'linux-*' }
       - run: |
           mkdir -p binaries/linux-{amd64,arm64,arm-v7}
           mv binaries/linux-amd64/ok-linux-amd64    binaries/linux-amd64/ok_server
           mv binaries/linux-arm64/ok-linux-arm64    binaries/linux-arm64/ok_server
           mv binaries/linux-armv7/ok-linux-armv7    binaries/linux-arm-v7/ok_server
-      - uses: docker/setup-qemu-action@v2
-      - uses: docker/setup-buildx-action@v2
-      - uses: docker/login-action@v2
+      - uses: docker/setup-qemu-action@2b82ce82d56a2a04d2637cd93a637ae1b359c0a7
+      - uses: docker/setup-buildx-action@885d1462b80bc1c1c7f0b00334ad271f09369c55
+      - uses: docker/login-action@465a07811f14bebb1938fbed4728c6a1ff8901fc
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - uses: docker/login-action@v2
-        with:
-          registry: ghcr.io
-          username: ${{ github.repository_owner }}
-          password: ${{ github.token }}
-      - uses: docker/build-push-action@v4
+      - uses: docker/build-push-action@0a97817b6ade9f46837855d676c4cca3a2471fc9
         with:
           context: .
           platforms: linux/amd64,linux/arm64,linux/arm/v7
@@ -320,7 +323,7 @@ jobs:
           build-args: |
             BINARY_NAME=ok_server
       - name: Update DockerHub README
-        uses: peter-evans/dockerhub-description@v4
+        uses: peter-evans/dockerhub-description@432a30c9e07499fd01da9f8a49f0faf9e0ca5b77
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}

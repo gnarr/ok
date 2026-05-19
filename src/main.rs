@@ -1,12 +1,12 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::panic;
-use std::sync::mpsc::{sync_channel, SyncSender, TrySendError};
+use std::sync::mpsc::{SyncSender, TrySendError, sync_channel};
 use std::time::{Duration, Instant};
 use std::{env, thread};
 
 const MAX_HEADER_SIZE: usize = 8192;
-const MAX_BODY_SIZE: usize = 1 * 1024 * 1024;
+const MAX_BODY_SIZE: usize = 1024 * 1024;
 const QUEUE_CAPACITY: usize = 100;
 const LOG_QUEUE_CAPACITY: usize = 100;
 
@@ -52,16 +52,6 @@ X-Content-Type-Options: nosniff\r\n\
 X-Frame-Options: DENY\r\n\
 Content-Length: 0\r\n\r\n";
 
-#[cfg(test)]
-fn body_timeout_duration() -> Duration {
-    Duration::from_millis(50)
-}
-
-#[cfg(not(test))]
-fn body_timeout_duration() -> Duration {
-    Duration::from_secs(5)
-}
-
 const FAVICON_PNG: &[u8] = &[
     0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
     0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x10, 0x08, 0x03, 0x00, 0x00, 0x00, 0x28, 0x2D, 0x0F,
@@ -91,9 +81,7 @@ fn parse_request_line(request_line: &str) -> (&str, &str) {
                 .map_or(&rest[..path_end_index], |(p, _)| p);
             return (method, path);
         }
-        let path = rest
-            .split_once('?')
-            .map_or(rest, |(p, _)| p);
+        let path = rest.split_once('?').map_or(rest, |(p, _)| p);
         return (method, path);
     }
     ("", "")
@@ -144,300 +132,10 @@ fn dispatch_connection(
     }
     *next = (*next + 1) % senders.len();
     if !dispatched {
-        let _ = log_tx
-            .try_send("Connection dropped: all workers unavailable or queues full".into());
+        let _ =
+            log_tx.try_send("Connection dropped: all workers unavailable or queues full".into());
     }
     dispatched
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        compute_pool_size, dispatch_connection, handle_connection, parse_request_line, read_body,
-        MAX_BODY_SIZE,
-    };
-    use std::io::{Read, Write};
-    use std::net::{TcpListener, TcpStream};
-    use std::sync::mpsc::sync_channel;
-    use std::thread;
-    use std::time::{Duration, Instant};
-
-    #[test]
-    fn parses_request_line_without_query() {
-        let (method, path) = parse_request_line("GET / HTTP/1.1");
-        assert_eq!(method, "GET");
-        assert_eq!(path, "/");
-    }
-
-    #[test]
-    fn strips_query_from_path() {
-        let (method, path) = parse_request_line("GET /?foo=bar HTTP/1.1");
-        assert_eq!(method, "GET");
-        assert_eq!(path, "/");
-    }
-
-    #[test]
-    fn handles_root_without_http_version() {
-        let (method, path) = parse_request_line("GET /");
-        assert_eq!(method, "GET");
-        assert_eq!(path, "/");
-    }
-
-    #[test]
-    fn handles_missing_http_version() {
-        let (method, path) = parse_request_line("GET /foo");
-        assert_eq!(method, "GET");
-        assert_eq!(path, "/foo");
-    }
-
-    #[test]
-    fn strips_query_with_http_version_and_path() {
-        let (method, path) = parse_request_line("GET /foo?bar=baz HTTP/1.1");
-        assert_eq!(method, "GET");
-        assert_eq!(path, "/foo");
-    }
-
-    #[test]
-    fn strips_multiple_query_params() {
-        let (method, path) = parse_request_line("GET /?foo=bar&baz=qux HTTP/1.1");
-        assert_eq!(method, "GET");
-        assert_eq!(path, "/");
-    }
-
-    #[test]
-    fn handles_empty_query_string() {
-        let (method, path) = parse_request_line("GET /? HTTP/1.1");
-        assert_eq!(method, "GET");
-        assert_eq!(path, "/");
-    }
-
-    #[test]
-    fn preserves_fragment_in_path() {
-        let (method, path) = parse_request_line("GET /#section HTTP/1.1");
-        assert_eq!(method, "GET");
-        assert_eq!(path, "/#section");
-    }
-
-    #[test]
-    fn handles_empty_request_line() {
-        let (method, path) = parse_request_line("");
-        assert_eq!(method, "");
-        assert_eq!(path, "");
-    }
-
-    #[test]
-    fn tolerates_extra_spaces_after_method() {
-        let (method, path) = parse_request_line("GET  /foo HTTP/1.1");
-        assert_eq!(method, "GET");
-        assert_eq!(path, "/foo");
-    }
-
-    #[test]
-    fn pool_size_clamps_zero_to_one() {
-        assert_eq!(compute_pool_size(Some("0".into()), Some(8)), 1);
-    }
-
-    #[test]
-    fn pool_size_uses_env_when_valid() {
-        assert_eq!(compute_pool_size(Some("5".into()), Some(8)), 5);
-    }
-
-    #[test]
-    fn pool_size_falls_back_to_available_parallelism() {
-        assert_eq!(compute_pool_size(None, Some(6)), 6);
-    }
-
-    #[test]
-    fn pool_size_uses_default_when_unset_and_unavailable() {
-        assert_eq!(compute_pool_size(None, None), 4);
-    }
-
-    #[test]
-    fn pool_size_uses_default_when_env_invalid_and_unavailable() {
-        assert_eq!(compute_pool_size(Some("abc".into()), None), 4);
-    }
-
-    #[test]
-    fn read_body_times_out_when_deadline_passed() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream
-                .set_read_timeout(Some(Duration::from_millis(100)))
-                .ok();
-            let deadline = Instant::now() - Duration::from_millis(1);
-            let err = read_body(&mut stream, 1, deadline)
-                .expect_err("expected read_body to time out");
-            (err.kind(), err.to_string())
-        });
-        let _client = TcpStream::connect(addr).unwrap();
-        let (kind, msg) = server.join().unwrap();
-        assert_eq!(kind, std::io::ErrorKind::TimedOut);
-        assert!(
-            msg.contains("Body read timeout"),
-            "expected body timeout message, got: {}",
-            msg
-        );
-    }
-
-    #[test]
-    fn read_body_succeeds_before_deadline() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-        let server = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let deadline = Instant::now() + Duration::from_secs(1);
-            read_body(&mut stream, 4, deadline).unwrap();
-        });
-        let mut client = TcpStream::connect(addr).unwrap();
-        client.write_all(b"test").unwrap();
-        server.join().unwrap();
-    }
-
-    fn run_request(raw: &str) -> Vec<u8> {
-        use std::net::Shutdown;
-
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test listener");
-        let addr = listener.local_addr().unwrap();
-        let (log_tx, _log_rx) = sync_channel::<String>(1);
-        let server = thread::spawn(move || {
-            if let Ok((stream, _)) = listener.accept() {
-                handle_connection(stream, log_tx, false);
-            }
-        });
-
-        let mut client = TcpStream::connect(addr).expect("connect to test listener");
-        client
-            .write_all(raw.as_bytes())
-            .expect("write request to server");
-        let _ = client.shutdown(Shutdown::Write);
-        let mut buf = Vec::new();
-        client.read_to_end(&mut buf).expect("read response");
-        let _ = server.join();
-        buf
-    }
-
-    #[test]
-    fn rejects_oversized_content_length_with_413() {
-        let request = format!(
-            "GET / HTTP/1.1\r\nHost: example\r\nContent-Length: {}\r\n\r\n",
-            MAX_BODY_SIZE + 1
-        );
-        let response_bytes = run_request(&request);
-        let response = String::from_utf8_lossy(&response_bytes);
-        assert!(
-            response.starts_with("HTTP/1.1 413"),
-            "unexpected response: {}",
-            response
-        );
-    }
-
-    #[test]
-    fn accepts_valid_content_length() {
-        let request = "GET / HTTP/1.1\r\nHost: example\r\nContent-Length: 5\r\n\r\nhello";
-        let response_bytes = run_request(request);
-        let response = String::from_utf8_lossy(&response_bytes);
-        assert!(
-            response.starts_with("HTTP/1.1 200"),
-            "unexpected response: {}",
-            response
-        );
-    }
-
-    #[test]
-    fn rejects_chunked_requests_with_501() {
-        let request = "GET / HTTP/1.1\r\nHost: example\r\nTransfer-Encoding: chunked\r\n\r\n";
-        let response_bytes = run_request(request);
-        let response = String::from_utf8_lossy(&response_bytes);
-        assert!(
-            response.starts_with("HTTP/1.1 501"),
-            "unexpected response: {}",
-            response
-        );
-    }
-
-    fn make_stream_pair() -> (TcpStream, TcpStream) {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-        let client = TcpStream::connect(addr).unwrap();
-        let (server, _) = listener.accept().unwrap();
-        (client, server)
-    }
-
-    #[test]
-    fn retries_across_workers_when_queue_full() {
-        let (tx1, rx1) = sync_channel::<TcpStream>(1);
-        let (tx2, rx2) = sync_channel::<TcpStream>(1);
-        let mut senders = vec![Some(tx1), Some(tx2)];
-        let (client1, _server1) = make_stream_pair();
-        // Fill first queue
-        senders[0].as_ref().unwrap().try_send(client1).unwrap();
-
-        let (client2, server2) = make_stream_pair();
-        let (log_tx, _log_rx) = sync_channel::<String>(10);
-        let mut next = 0;
-
-        let dispatched = dispatch_connection(&mut senders, client2, &log_tx, &mut next);
-        assert!(dispatched);
-        let recv2 = rx2.try_recv().expect("worker 2 should receive");
-        assert_eq!(recv2.peer_addr().unwrap(), server2.local_addr().unwrap());
-        assert!(rx1.try_recv().is_ok());
-    }
-
-    #[test]
-    fn advances_round_robin_counter_with_multiple_workers() {
-        let (tx1, _rx1) = sync_channel::<TcpStream>(1);
-        let (tx2, rx2) = sync_channel::<TcpStream>(1);
-        let mut senders = vec![Some(tx1), Some(tx2)];
-        let (client, _server) = make_stream_pair();
-        let (log_tx, _log_rx) = sync_channel::<String>(10);
-        let mut next = 0;
-        let dispatched = dispatch_connection(&mut senders, client, &log_tx, &mut next);
-        assert!(dispatched);
-        assert_eq!(next, 1);
-        let _ = rx2.try_recv();
-    }
-
-    #[test]
-    fn drops_after_all_workers_tried() {
-        let (tx1, rx1) = sync_channel::<TcpStream>(1);
-        let (tx2, rx2) = sync_channel::<TcpStream>(1);
-        let mut senders = vec![Some(tx1), Some(tx2)];
-        let (client1, _server1) = make_stream_pair();
-        let (client2, _server2) = make_stream_pair();
-        senders[0].as_ref().unwrap().try_send(client1).unwrap();
-        senders[1].as_ref().unwrap().try_send(client2).unwrap();
-
-        let (client3, _server3) = make_stream_pair();
-        let (log_tx, log_rx) = sync_channel::<String>(10);
-        let mut next = 0;
-
-        let dispatched = dispatch_connection(&mut senders, client3, &log_tx, &mut next);
-        assert!(!dispatched);
-        assert!(log_rx.try_iter().any(|m| m.contains("unavailable")));
-        drop(rx1);
-        drop(rx2);
-    }
-
-    #[test]
-    fn skips_disconnected_workers() {
-        let (tx1, _rx1) = sync_channel::<TcpStream>(1);
-        let (tx2, rx2) = sync_channel::<TcpStream>(1);
-        let mut senders = vec![Some(tx1), Some(tx2)];
-        // Drop receiver for worker 0 to force Disconnected
-        drop(_rx1);
-
-        let (client, _server) = make_stream_pair();
-        let (log_tx, log_rx) = sync_channel::<String>(10);
-        let mut next = 0;
-
-        let dispatched = dispatch_connection(&mut senders, client, &log_tx, &mut next);
-        assert!(dispatched);
-        assert!(rx2.try_recv().is_ok());
-        assert!(senders[0].is_none());
-        assert!(log_rx.try_iter().any(|m| m.contains("disconnected")));
-    }
 }
 
 fn read_headers(stream: &mut TcpStream) -> std::io::Result<String> {
@@ -482,40 +180,6 @@ fn read_headers(stream: &mut TcpStream) -> std::io::Result<String> {
     }
 
     Ok(String::from_utf8_lossy(&buffer[..total_read]).to_string())
-}
-
-fn read_body(
-    stream: &mut TcpStream,
-    mut remaining: usize,
-    deadline: Instant,
-) -> std::io::Result<()> {
-    if remaining > MAX_BODY_SIZE {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "Body too large",
-        ));
-    }
-    let mut buf = [0u8; 4096];
-    while remaining > 0 {
-        // The socket read timeout bounds a single blocking read; this deadline enforces a
-        // total time budget across the full body.
-        if Instant::now() >= deadline {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::TimedOut,
-                "Body read timeout",
-            ));
-        }
-        let to_read = std::cmp::min(buf.len(), remaining);
-        let n = stream.read(&mut buf[..to_read])?;
-        if n == 0 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::UnexpectedEof,
-                "Connection closed before full body was received",
-            ));
-        }
-        remaining -= n;
-    }
-    Ok(())
 }
 
 fn get_client_address(stream: &mut TcpStream, headers: &str) -> String {
@@ -624,21 +288,6 @@ fn handle_connection(mut stream: TcpStream, log_tx: SyncSender<String>, show_fav
             let _ = stream.write_all(RESPONSE_501);
         }
         _ => {
-            if content_length > 0 {
-                let body_deadline = Instant::now() + body_timeout_duration();
-                if let Err(e) = read_body(&mut stream, content_length, body_deadline) {
-                    match e.kind() {
-                        std::io::ErrorKind::InvalidData => {
-                            let _ = stream.write_all(RESPONSE_413);
-                        }
-                        std::io::ErrorKind::TimedOut => {
-                            let _ = stream.write_all(RESPONSE_408);
-                        }
-                        _ => {}
-                    }
-                    return;
-                }
-            }
             let _ = stream.write_all(RESPONSE_404);
         }
     }
@@ -681,7 +330,6 @@ fn main() -> std::io::Result<()> {
         let (tx, rx) = sync_channel::<TcpStream>(QUEUE_CAPACITY);
         senders.push(Some(tx));
         let log_tx_clone = log_tx.clone();
-        let show_favicon = show_favicon;
         thread::spawn(move || {
             for stream in rx {
                 if let Err(err) = panic::catch_unwind(|| {
@@ -705,4 +353,319 @@ fn main() -> std::io::Result<()> {
         dispatch_connection(&mut senders, stream, &log_tx, &mut next);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        MAX_BODY_SIZE, compute_pool_size, dispatch_connection, handle_connection,
+        parse_request_line,
+    };
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::mpsc::sync_channel;
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn parses_request_line_without_query() {
+        let (method, path) = parse_request_line("GET / HTTP/1.1");
+        assert_eq!(method, "GET");
+        assert_eq!(path, "/");
+    }
+
+    #[test]
+    fn strips_query_from_path() {
+        let (method, path) = parse_request_line("GET /?foo=bar HTTP/1.1");
+        assert_eq!(method, "GET");
+        assert_eq!(path, "/");
+    }
+
+    #[test]
+    fn handles_root_without_http_version() {
+        let (method, path) = parse_request_line("GET /");
+        assert_eq!(method, "GET");
+        assert_eq!(path, "/");
+    }
+
+    #[test]
+    fn handles_missing_http_version() {
+        let (method, path) = parse_request_line("GET /foo");
+        assert_eq!(method, "GET");
+        assert_eq!(path, "/foo");
+    }
+
+    #[test]
+    fn strips_query_with_http_version_and_path() {
+        let (method, path) = parse_request_line("GET /foo?bar=baz HTTP/1.1");
+        assert_eq!(method, "GET");
+        assert_eq!(path, "/foo");
+    }
+
+    #[test]
+    fn strips_multiple_query_params() {
+        let (method, path) = parse_request_line("GET /?foo=bar&baz=qux HTTP/1.1");
+        assert_eq!(method, "GET");
+        assert_eq!(path, "/");
+    }
+
+    #[test]
+    fn handles_empty_query_string() {
+        let (method, path) = parse_request_line("GET /? HTTP/1.1");
+        assert_eq!(method, "GET");
+        assert_eq!(path, "/");
+    }
+
+    #[test]
+    fn preserves_fragment_in_path() {
+        let (method, path) = parse_request_line("GET /#section HTTP/1.1");
+        assert_eq!(method, "GET");
+        assert_eq!(path, "/#section");
+    }
+
+    #[test]
+    fn handles_empty_request_line() {
+        let (method, path) = parse_request_line("");
+        assert_eq!(method, "");
+        assert_eq!(path, "");
+    }
+
+    #[test]
+    fn tolerates_extra_spaces_after_method() {
+        let (method, path) = parse_request_line("GET  /foo HTTP/1.1");
+        assert_eq!(method, "GET");
+        assert_eq!(path, "/foo");
+    }
+
+    #[test]
+    fn pool_size_clamps_zero_to_one() {
+        assert_eq!(compute_pool_size(Some("0".into()), Some(8)), 1);
+    }
+
+    #[test]
+    fn pool_size_uses_env_when_valid() {
+        assert_eq!(compute_pool_size(Some("5".into()), Some(8)), 5);
+    }
+
+    #[test]
+    fn pool_size_falls_back_to_available_parallelism() {
+        assert_eq!(compute_pool_size(None, Some(6)), 6);
+    }
+
+    #[test]
+    fn pool_size_uses_default_when_unset_and_unavailable() {
+        assert_eq!(compute_pool_size(None, None), 4);
+    }
+
+    #[test]
+    fn pool_size_uses_default_when_env_invalid_and_unavailable() {
+        assert_eq!(compute_pool_size(Some("abc".into()), None), 4);
+    }
+
+    fn run_request(raw: &str) -> Vec<u8> {
+        use std::net::Shutdown;
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test listener");
+        let addr = listener.local_addr().unwrap();
+        let (log_tx, _log_rx) = sync_channel::<String>(1);
+        let server = thread::spawn(move || {
+            if let Ok((stream, _)) = listener.accept() {
+                handle_connection(stream, log_tx, false);
+            }
+        });
+
+        let mut client = TcpStream::connect(addr).expect("connect to test listener");
+        client
+            .write_all(raw.as_bytes())
+            .expect("write request to server");
+        let _ = client.shutdown(Shutdown::Write);
+        let mut buf = Vec::new();
+        client.read_to_end(&mut buf).expect("read response");
+        let _ = server.join();
+        buf
+    }
+
+    #[test]
+    fn rejects_oversized_content_length_with_413() {
+        let request = format!(
+            "GET / HTTP/1.1\r\nHost: example\r\nContent-Length: {}\r\n\r\n",
+            MAX_BODY_SIZE + 1
+        );
+        let response_bytes = run_request(&request);
+        let response = String::from_utf8_lossy(&response_bytes);
+        assert!(
+            response.starts_with("HTTP/1.1 413"),
+            "unexpected response: {}",
+            response
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_content_length_with_431() {
+        let request = "GET / HTTP/1.1\r\nHost: example\r\nContent-Length: nope\r\n\r\n";
+        let response_bytes = run_request(request);
+        let response = String::from_utf8_lossy(&response_bytes);
+        assert!(
+            response.starts_with("HTTP/1.1 431"),
+            "unexpected response: {}",
+            response
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_content_length_with_431() {
+        let request =
+            "GET / HTTP/1.1\r\nHost: example\r\nContent-Length: 5\r\nContent-Length: 5\r\n\r\n";
+        let response_bytes = run_request(request);
+        let response = String::from_utf8_lossy(&response_bytes);
+        assert!(
+            response.starts_with("HTTP/1.1 431"),
+            "unexpected response: {}",
+            response
+        );
+    }
+
+    #[test]
+    fn accepts_valid_content_length() {
+        let request = "GET / HTTP/1.1\r\nHost: example\r\nContent-Length: 5\r\n\r\nhello";
+        let response_bytes = run_request(request);
+        let response = String::from_utf8_lossy(&response_bytes);
+        assert!(
+            response.starts_with("HTTP/1.1 200"),
+            "unexpected response: {}",
+            response
+        );
+    }
+
+    #[test]
+    fn rejects_chunked_requests_with_501() {
+        let request = "GET / HTTP/1.1\r\nHost: example\r\nTransfer-Encoding: chunked\r\n\r\n";
+        let response_bytes = run_request(request);
+        let response = String::from_utf8_lossy(&response_bytes);
+        assert!(
+            response.starts_with("HTTP/1.1 501"),
+            "unexpected response: {}",
+            response
+        );
+    }
+
+    #[test]
+    fn unmatched_get_with_declared_body_returns_404_without_reading_body() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test listener");
+        let addr = listener.local_addr().unwrap();
+        let (log_tx, _log_rx) = sync_channel::<String>(1);
+        let server = thread::spawn(move || {
+            if let Ok((stream, _)) = listener.accept() {
+                handle_connection(stream, log_tx, false);
+            }
+        });
+
+        let mut client = TcpStream::connect(addr).expect("connect to test listener");
+        client
+            .write_all(b"GET /missing HTTP/1.1\r\nHost: example\r\nContent-Length: 5\r\n\r\n")
+            .expect("write request headers");
+        client
+            .set_read_timeout(Some(Duration::from_millis(500)))
+            .expect("set read timeout");
+
+        let start = Instant::now();
+        let mut buf = [0; 128];
+        let n = client.read(&mut buf).expect("read response");
+        let elapsed = start.elapsed();
+        let response = String::from_utf8_lossy(&buf[..n]);
+
+        assert!(
+            response.starts_with("HTTP/1.1 404"),
+            "unexpected response: {}",
+            response
+        );
+        assert!(
+            elapsed < Duration::from_millis(250),
+            "response took too long: {:?}",
+            elapsed
+        );
+        let _ = server.join();
+    }
+
+    fn make_stream_pair() -> (TcpStream, TcpStream) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = TcpStream::connect(addr).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        (client, server)
+    }
+
+    #[test]
+    fn retries_across_workers_when_queue_full() {
+        let (tx1, rx1) = sync_channel::<TcpStream>(1);
+        let (tx2, rx2) = sync_channel::<TcpStream>(1);
+        let mut senders = vec![Some(tx1), Some(tx2)];
+        let (client1, _server1) = make_stream_pair();
+        // Fill first queue
+        senders[0].as_ref().unwrap().try_send(client1).unwrap();
+
+        let (client2, server2) = make_stream_pair();
+        let (log_tx, _log_rx) = sync_channel::<String>(10);
+        let mut next = 0;
+
+        let dispatched = dispatch_connection(&mut senders, client2, &log_tx, &mut next);
+        assert!(dispatched);
+        let recv2 = rx2.try_recv().expect("worker 2 should receive");
+        assert_eq!(recv2.peer_addr().unwrap(), server2.local_addr().unwrap());
+        assert!(rx1.try_recv().is_ok());
+    }
+
+    #[test]
+    fn advances_round_robin_counter_with_multiple_workers() {
+        let (tx1, _rx1) = sync_channel::<TcpStream>(1);
+        let (tx2, rx2) = sync_channel::<TcpStream>(1);
+        let mut senders = vec![Some(tx1), Some(tx2)];
+        let (client, _server) = make_stream_pair();
+        let (log_tx, _log_rx) = sync_channel::<String>(10);
+        let mut next = 0;
+        let dispatched = dispatch_connection(&mut senders, client, &log_tx, &mut next);
+        assert!(dispatched);
+        assert_eq!(next, 1);
+        let _ = rx2.try_recv();
+    }
+
+    #[test]
+    fn drops_after_all_workers_tried() {
+        let (tx1, rx1) = sync_channel::<TcpStream>(1);
+        let (tx2, rx2) = sync_channel::<TcpStream>(1);
+        let mut senders = vec![Some(tx1), Some(tx2)];
+        let (client1, _server1) = make_stream_pair();
+        let (client2, _server2) = make_stream_pair();
+        senders[0].as_ref().unwrap().try_send(client1).unwrap();
+        senders[1].as_ref().unwrap().try_send(client2).unwrap();
+
+        let (client3, _server3) = make_stream_pair();
+        let (log_tx, log_rx) = sync_channel::<String>(10);
+        let mut next = 0;
+
+        let dispatched = dispatch_connection(&mut senders, client3, &log_tx, &mut next);
+        assert!(!dispatched);
+        assert!(log_rx.try_iter().any(|m| m.contains("unavailable")));
+        drop(rx1);
+        drop(rx2);
+    }
+
+    #[test]
+    fn skips_disconnected_workers() {
+        let (tx1, _rx1) = sync_channel::<TcpStream>(1);
+        let (tx2, rx2) = sync_channel::<TcpStream>(1);
+        let mut senders = vec![Some(tx1), Some(tx2)];
+        // Drop receiver for worker 0 to force Disconnected
+        drop(_rx1);
+
+        let (client, _server) = make_stream_pair();
+        let (log_tx, log_rx) = sync_channel::<String>(10);
+        let mut next = 0;
+
+        let dispatched = dispatch_connection(&mut senders, client, &log_tx, &mut next);
+        assert!(dispatched);
+        assert!(rx2.try_recv().is_ok());
+        assert!(senders[0].is_none());
+        assert!(log_rx.try_iter().any(|m| m.contains("disconnected")));
+    }
 }
