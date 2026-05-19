@@ -2,11 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.4] - 2026-05-19
+
+### 🐛 Bug Fixes
+
+- Harden release workflow and avoid slow body reads
+
 ## [0.4.3] - 2025-11-26
 
 ### ⚙️ Miscellaneous Tasks
 
 - *(ci)* Simplify artifact name extraction with grep
+- Update changelog for v0.4.3
+- Release ok version 0.4.3
 
 ## [0.4.2] - 2025-11-26
 
